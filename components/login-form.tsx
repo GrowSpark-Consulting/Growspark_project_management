@@ -163,6 +163,8 @@ export function LoginForm({
                   onChange={(e) => { setEmail(e.target.value); }}
                   required
                   disabled={isLoading}
+                  aria-invalid={!!error}
+                  aria-describedby={error ? 'login-error' : undefined}
                 />
               </Field>
               
@@ -185,17 +187,19 @@ export function LoginForm({
                   onChange={(e) => { setPassword(e.target.value); }}
                   required
                   disabled={isLoading}
+                  aria-invalid={!!error}
+                  aria-describedby={error ? 'login-error' : undefined}
                 />
               </Field>
 
               {error && (
-                <div className="text-sm text-red-600 bg-red-50 p-3 rounded-md">
+                <div id="login-error" role="alert" className="text-sm text-red-600 bg-red-50 p-3 rounded-md">
                   {error}
                 </div>
               )}
 
               {message && (
-                <div className="text-sm text-green-600 bg-green-50 p-3 rounded-md">
+                <div role="status" className="text-sm text-green-600 bg-green-50 p-3 rounded-md">
                   {message}
                 </div>
               )}
