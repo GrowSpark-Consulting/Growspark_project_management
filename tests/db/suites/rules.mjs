@@ -716,6 +716,18 @@ export async function run(report) {
       const d = await asService(() => tryQ(`delete from public.audit_log`));
       return { pass: !u.ok && !d.ok && (await q(`select count(*)::int n from public.audit_log where action = 'tampered'`)).rows[0].n === 0, info: `update: ${describe(u)}; delete: ${describe(d)}` };
     });
+    await check('SEC12-actor-deleted', 'A user who appears in the audit log can be deleted; the entry keeps their id in details', async () => {
+      const gone = (await q(`insert into auth.users (email) values ('audit.actor@test.local') returning id`)).rows[0].id;
+      await asService(() => tryQ(`insert into public.audit_log (actor_id, action, entity_type) values ($1,'user_suspend','user')`, [gone]));
+      const del = await tryQ(`delete from public.user_profiles where id = $1`, [gone]);
+      const row = (await q(`select actor_id, action, details from public.audit_log where details->>'deleted_actor_id' = $1`, [gone])).rows[0];
+      return { pass: del.ok && row?.actor_id === null && row?.action === 'user_suspend', info: del.ok ? `entry kept: action=${row?.action}, actor_id=${row?.actor_id}` : describe(del) };
+    });
+    await check('SEC12-unlink-only', 'Clearing the actor is the only change allowed: changing it to someone else is refused', async () => {
+      const r = await asService(() => tryQ(`update public.audit_log set actor_id = $1 where actor_id = $2`, [U.emp, U.admin]));
+      const s = await asService(() => tryQ(`update public.audit_log set actor_id = null, action = 'x' where actor_id = $1`, [U.admin]));
+      return { pass: !r.ok && !s.ok, info: `reassign: ${describe(r)}; clear + edit: ${describe(s)}` };
+    });
   }
 
   // ---- D-1 project completes when its workflow completes
@@ -779,6 +791,7 @@ export async function run(report) {
     const r = await newProject(U.emp, empManaged, 'No permission');
     return { pass: denied(r), info: describe(r) };
   });
+
 
   await db.close();
 }

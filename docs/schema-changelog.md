@@ -10,6 +10,14 @@ A short record of every database change, so the Sales & CRM and People & HR team
 
 ---
 
+## 2026-11-22: Users who appear in the audit log can be deleted
+
+| Migration | Change |
+|---|---|
+| `20261122001200_audit_log_allow_actor_unlink.sql` | `audit_log_append_only()` now allows the one update that `ON DELETE SET NULL` performs: clearing `actor_id` while every other column stays identical. The deleted person's id is kept in `details.deleted_actor_id`. Before, deleting any user who had done something audited failed ("Database error deleting user"). Any other update, and every delete, is still refused. |
+
+**Compatibility:** changes one trigger function; no table changes. Applied to local Docker only.
+
 ## 2026-11-22: Account managers can create projects in their account
 
 | Migration | Change |
