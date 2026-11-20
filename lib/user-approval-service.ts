@@ -1,11 +1,8 @@
 /**
- * User Approval Service
- * Handles user approval workflow for new user registrations
+ * Sign-up approval client. Everything goes through the API (server side checks, no browser
+ * access to the tables). See lib/user-approval-server.ts for what "pending" and "approved" mean.
  */
-
-
-import { createClientSupabase } from './supabase';
-import { logger, databaseQuery, databaseError, userAction } from './debug-logger';
+import { logger } from './debug-logger';
 
 export interface UserProfile {
   id: string;
@@ -37,408 +34,59 @@ export interface ApprovalAction {
   reason?: string;
 }
 
+async function call(path: string, init?: RequestInit) {
+  const res = await fetch(path, { credentials: 'include', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) } });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
 class UserApprovalService {
-  private async getSupabase(): Promise<any | null> {
-    return createClientSupabase();
-  }
-
-  /**
-   * Get all users pending approval
-   */
+  /** People who signed up and are waiting for a role. */
   async getPendingUsers(): Promise<PendingUser[]> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'getPendingUsers' });
-        return [];
-      }
-
-      databaseQuery('SELECT', 'pending_user_approvals', { action: 'getPendingUsers' });
-
-      const { data: pendingUsers, error } = await supabase
-        .from('pending_user_approvals')
-        .select('*')
-        .order('approval_requested_at', { ascending: true });
-
-      if (error) {
-        databaseError('SELECT', 'pending_user_approvals', error, { action: 'getPendingUsers' });
-        logger.error('Error fetching pending users', { action: 'getPendingUsers' }, error);
-        return [];
-      }
-
-      logger.info(`Found ${pendingUsers?.length || 0} pending users`, { 
-        action: 'getPendingUsers',
-        count: pendingUsers?.length || 0
-      });
-
-      return pendingUsers || [];
-    } catch (error: unknown) {
-      logger.error('Exception in getPendingUsers', { action: 'getPendingUsers' }, error as Error);
-      return [];
-    }
+    const r = await call('/api/users/pending');
+    if (!r.ok) throw new Error(r.body?.error || 'Failed to load pending users');
+    return r.body.users || [];
   }
 
-  /**
-   * Approve a user
-   */
-  async approveUser(userId: string, approvedBy: string, reason?: string): Promise<boolean> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'approveUser', userId });
-        return false;
-      }
-
-      databaseQuery('UPDATE', 'user_profiles', { action: 'approveUser', userId, approvedBy });
-
-      const { error } = await (supabase as any)
-        .from('user_profiles')
-        .update({
-          is_approved: true,
-          approved_by: approvedBy,
-          approved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-        .eq('is_approved', false); // Only approve if not already approved
-
-      if (error) {
-        databaseError('UPDATE', 'user_profiles', error, { action: 'approveUser', userId });
-        logger.error('Error approving user', { action: 'approveUser', userId }, error);
-        return false;
-      }
-
-      userAction('approved', userId, { action: 'approveUser', approvedBy, reason });
-      logger.info('User approved successfully', { 
-        action: 'approveUser', 
-        userId, 
-        approvedBy,
-        reason 
-      });
-
-      return true;
-    } catch (error: unknown) {
-      logger.error('Exception in approveUser', { action: 'approveUser', userId }, error as Error);
-      return false;
-    }
+  /** Approve = assign a role (Employee unless roleId is given). */
+  async approveUser(userId: string, _approvedBy: string, reason?: string, roleId?: string): Promise<boolean> {
+    const r = await call('/api/users/approve', { method: 'POST', body: JSON.stringify({ userId, action: 'approve', reason, roleId }) });
+    if (!r.ok) logger.error('Approve user failed', { userId, error: r.body?.error });
+    return r.ok;
   }
 
-  /**
-   * Reject a user (delete their account)
-   */
-  async rejectUser(userId: string, rejectedBy: string, reason?: string): Promise<boolean> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'rejectUser', userId });
-        return false;
-      }
-
-      // First, remove any role assignments
-      databaseQuery('DELETE', 'user_roles', { action: 'rejectUser', userId });
-
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', userId);
-
-      if (roleError) {
-        databaseError('DELETE', 'user_roles', roleError, { action: 'rejectUser', userId });
-        logger.warn('Error removing user roles during rejection', { 
-          action: 'rejectUser', 
-          userId 
-        });
-      }
-
-      // Then delete the user profile
-      databaseQuery('DELETE', 'user_profiles', { action: 'rejectUser', userId });
-
-      const { error } = await supabase
-        .from('user_profiles')
-        .delete()
-        .eq('id', userId)
-        .eq('is_approved', false); // Only delete if not approved
-
-      if (error) {
-        databaseError('DELETE', 'user_profiles', error, { action: 'rejectUser', userId });
-        logger.error('Error rejecting user', { action: 'rejectUser', userId }, error);
-        return false;
-      }
-
-      userAction('rejected', userId, { action: 'rejectUser', rejectedBy, reason });
-      logger.info('User rejected successfully', { 
-        action: 'rejectUser', 
-        userId, 
-        rejectedBy,
-        reason 
-      });
-
-      return true;
-    } catch (error: unknown) {
-      logger.error('Exception in rejectUser', { action: 'rejectUser', userId }, error as Error);
-      return false;
-    }
+  /** Reject = deactivate the account. */
+  async rejectUser(userId: string, _rejectedBy: string, reason?: string): Promise<boolean> {
+    const r = await call('/api/users/approve', { method: 'POST', body: JSON.stringify({ userId, action: 'reject', reason }) });
+    if (!r.ok) logger.error('Reject user failed', { userId, error: r.body?.error });
+    return r.ok;
   }
 
-  /**
-   * Request approval for a user (usually called on signup)
-   */
-  async requestApproval(userId: string): Promise<boolean> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'requestApproval', userId });
-        return false;
-      }
-
-      databaseQuery('UPDATE', 'user_profiles', { action: 'requestApproval', userId });
-
-      const { error } = await (supabase as any)
-        .from('user_profiles')
-        .update({
-          is_approved: false,
-          approval_requested_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
-
-      if (error) {
-        databaseError('UPDATE', 'user_profiles', error, { action: 'requestApproval', userId });
-        logger.error('Error requesting approval', { action: 'requestApproval', userId }, error);
-        return false;
-      }
-
-      userAction('approval_requested', userId, { action: 'requestApproval' });
-      logger.info('Approval requested successfully', { action: 'requestApproval', userId });
-
-      return true;
-    } catch (error: unknown) {
-      logger.error('Exception in requestApproval', { action: 'requestApproval', userId }, error as Error);
-      return false;
-    }
+  /** Tell the administrators this account is waiting. */
+  async requestApproval(_userId: string): Promise<boolean> {
+    return (await call('/api/users/approval-status', { method: 'POST', body: '{}' })).ok;
   }
 
-  /**
-   * Check if a user is approved
-   */
-  async isUserApproved(userId: string): Promise<boolean> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'isUserApproved', userId });
-        return false;
-      }
-
-      databaseQuery('SELECT', 'user_profiles', { action: 'isUserApproved', userId });
-
-      const { data: user, error } = await supabase
-        .from('user_profiles')
-        .select('is_approved')
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        databaseError('SELECT', 'user_profiles', error, { action: 'isUserApproved', userId });
-        logger.error('Error checking user approval status', { action: 'isUserApproved', userId }, error);
-        return false;
-      }
-
-      const isApproved = ((user as Record<string, unknown>)?.is_approved as boolean) || false;
-      logger.debug('User approval status checked', { 
-        action: 'isUserApproved', 
-        userId, 
-        isApproved 
-      });
-
-      return isApproved;
-    } catch (error: unknown) {
-      logger.error('Exception in isUserApproved', { action: 'isUserApproved', userId }, error as Error);
-      return false;
-    }
+  /** Does the signed-in user have a real role (or is a client / superadmin)? */
+  async isUserApproved(_userId: string): Promise<boolean> {
+    const r = await call('/api/users/approval-status');
+    return r.ok && !!r.body?.approved;
   }
 
-  /**
-   * Get approval statistics
-   */
-  async getApprovalStats(): Promise<{
-    total_pending: number;
-    total_approved: number;
-    total_rejected: number;
-    pending_by_date: Record<string, number>;
-  }> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'getApprovalStats' });
-        return {
-          total_pending: 0,
-          total_approved: 0,
-          total_rejected: 0,
-          pending_by_date: {},
-        };
-      }
-
-      databaseQuery('SELECT', 'user_profiles', { action: 'getApprovalStats' });
-
-      const { data: users, error } = await supabase
-        .from('user_profiles')
-        .select('is_approved, approval_requested_at, created_at');
-
-      if (error) {
-        databaseError('SELECT', 'user_profiles', error, { action: 'getApprovalStats' });
-        logger.error('Error fetching approval stats', { action: 'getApprovalStats' }, error);
-        return {
-          total_pending: 0,
-          total_approved: 0,
-          total_rejected: 0,
-          pending_by_date: {},
-        };
-      }
-
-      const stats = {
-        total_pending: 0,
-        total_approved: 0,
-        total_rejected: 0,
-        pending_by_date: {} as Record<string, number>,
-      };
-
-      users?.forEach((user: any) => {
-        if (user.is_approved) {
-          stats.total_approved++;
-        } else {
-          stats.total_pending++;
-
-          // Group pending by date
-          const date = new Date((user.approval_requested_at || user.created_at) as string).toISOString().split('T')[0];
-          stats.pending_by_date[date] = (stats.pending_by_date[date] || 0) + 1;
-        }
-      });
-
-      logger.info('Approval stats retrieved', { 
-        action: 'getApprovalStats',
-        ...stats
-      });
-
-      return stats;
-    } catch (error: unknown) {
-      logger.error('Exception in getApprovalStats', { action: 'getApprovalStats' }, error as Error);
-      return {
-        total_pending: 0,
-        total_approved: 0,
-        total_rejected: 0,
-        pending_by_date: {},
-      };
-    }
+  async getApprovalStats(): Promise<{ total_pending: number; total_approved: number; total_rejected: number; pending_by_date: Record<string, number> }> {
+    const r = await call('/api/users/approve');
+    if (!r.ok) throw new Error(r.body?.error || 'Failed to load approval stats');
+    return r.body.stats;
   }
 
-  /**
-   * Bulk approve multiple users
-   */
-  async bulkApproveUsers(userIds: string[], approvedBy: string, reason?: string): Promise<{
-    successful: string[];
-    failed: string[];
-  }> {
-    try {
-      logger.info(`Starting bulk approval for ${userIds.length} users`, { 
-        action: 'bulkApproveUsers',
-        count: userIds.length,
-        approvedBy
-      });
-
-      const results = {
-        successful: [] as string[],
-        failed: [] as string[],
-      };
-
-      // Process approvals in parallel with limited concurrency
-      const batchSize = 5;
-      for (let i = 0; i < userIds.length; i += batchSize) {
-        const batch = userIds.slice(i, i + batchSize);
-        
-        const batchPromises = batch.map(async (userId) => {
-          const success = await this.approveUser(userId, approvedBy, reason);
-          if (success) {
-            results.successful.push(userId);
-          } else {
-            results.failed.push(userId);
-          }
-        });
-
-        await Promise.all(batchPromises);
-      }
-
-      logger.info('Bulk approval completed', { 
-        action: 'bulkApproveUsers',
-        successful: results.successful.length,
-        failed: results.failed.length,
-        approvedBy
-      });
-
-      return results;
-    } catch (error: unknown) {
-      logger.error('Exception in bulkApproveUsers', { action: 'bulkApproveUsers' }, error as Error);
-      return {
-        successful: [],
-        failed: userIds,
-      };
+  async bulkApproveUsers(userIds: string[], approvedBy: string, reason?: string): Promise<{ successful: string[]; failed: string[] }> {
+    const successful: string[] = [];
+    const failed: string[] = [];
+    for (const id of userIds) {
+      ((await this.approveUser(id, approvedBy, reason)) ? successful : failed).push(id);
     }
-  }
-
-  /**
-   * Get user approval history
-   */
-  async getUserApprovalHistory(userId: string): Promise<{
-    approval_requested_at: string | null;
-    approved_at: string | null;
-    approved_by: string | null;
-    approver_name: string | null;
-  } | null> {
-    try {
-      const supabase = await this.getSupabase();
-      if (!supabase) {
-        logger.error('Supabase client not available', { action: 'getUserApprovalHistory', userId });
-        return null;
-      }
-
-      databaseQuery('SELECT', 'user_profiles', { action: 'getUserApprovalHistory', userId });
-
-      const { data: user, error } = await supabase
-        .from('user_profiles')
-        .select(`
-          approval_requested_at,
-          approved_at,
-          approved_by,
-          approver:approved_by(name)
-        `)
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        databaseError('SELECT', 'user_profiles', error, { action: 'getUserApprovalHistory', userId });
-        logger.error('Error fetching user approval history', { action: 'getUserApprovalHistory', userId }, error);
-        return null;
-      }
-
-      const history = {
-        approval_requested_at: (user as Record<string, unknown>)?.approval_requested_at as string | null || null,
-        approved_at: (user as Record<string, unknown>)?.approved_at as string | null || null,
-        approved_by: (user as Record<string, unknown>)?.approved_by as string | null || null,
-        approver_name: ((user as Record<string, unknown>)?.approver as Record<string, unknown>)?.name as string | null || null,
-      };
-
-      logger.debug('User approval history retrieved', { 
-        action: 'getUserApprovalHistory', 
-        userId,
-        hasApproval: !!history.approved_at
-      });
-
-      return history;
-    } catch (error: unknown) {
-      logger.error('Exception in getUserApprovalHistory', { action: 'getUserApprovalHistory', userId }, error as Error);
-      return null;
-    }
+    return { successful, failed };
   }
 }
 
-// Export singleton instance
 export const userApprovalService = new UserApprovalService();

@@ -16,6 +16,7 @@ import { requireAuthentication, AuthenticationError, PermissionError, ForbiddenE
 import { profilePermissions, isSuperadminProfile, isClientProfile } from '@/lib/portal';
 import { isValidUUID } from '@/lib/validation-helpers';
 import { logger } from '@/lib/debug-logger';
+import { recordAudit } from '@/lib/audit';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Db = any;
@@ -187,6 +188,13 @@ export async function requireProject(
   }
   if (level === 'contribute' && !access.canContribute) throw new HttpError(403, 'You are not on this project team');
   if (level === 'manage' && !access.canManage) throw new HttpError(403, 'Only a project manager can do this');
+  // SEC-12: write access granted only because of a superadmin / override right is recorded
+  if ((level === 'contribute' || level === 'manage') && !access.isMember && (ctx.isSuperadmin || ctx.has('manage_all_projects'))) {
+    await recordAudit(ctx.admin, {
+      actorId: ctx.userId, action: 'override_access', entityType: 'project', entityId: projectId, projectId,
+      details: { level, via: ctx.isSuperadmin ? 'superadmin' : 'manage_all_projects', project: access.project.name },
+    });
+  }
   return access;
 }
 

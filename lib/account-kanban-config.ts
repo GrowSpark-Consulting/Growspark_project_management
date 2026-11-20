@@ -70,8 +70,12 @@ class AccountKanbanConfigService {
         .from('account_kanban_configs')
         .select('*')
         .eq('account_id', accountId)
-        .single();
+        .maybeSingle(); // no row = no custom config (avoids a 406 in the browser console)
 
+      if (!error && !data) {
+        logger.debug('No kanban config found in database for account', { accountId });
+        return null;
+      }
       if (error) {
         if (error.code === 'PGRST116') {
           // No config found, return default

@@ -18,7 +18,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient, createApiSupabaseClient } from './supabase-server';
+import { createServerSupabaseClient, createApiSupabaseClient, createAdminSupabaseClient } from './supabase-server';
 import { UserWithRoles } from './rbac';
 import { Permission, PermissionContext } from './permissions';
 import { checkPermissionHybrid, isSuperadmin } from './permission-checker';
@@ -171,7 +171,19 @@ export async function requireAuthentication(request?: NextRequest): Promise<User
     }
 
     if ((userProfile as { is_active?: boolean }).is_active === false) {
-      throw new ForbiddenError('Your account has been deactivated');
+      const p = userProfile as { suspended_until?: string | null; suspension_reason?: string | null };
+      if (p.suspended_until && new Date(p.suspended_until).getTime() <= Date.now()) {
+        // The suspension has ended: lift it (Supabase Auth's sign-in ban has already expired)
+        const admin = createAdminSupabaseClient();
+        if (admin) {
+          await admin.from('user_profiles').update({ is_active: true, deactivated_at: null, suspended_until: null, suspension_reason: null }).eq('id', user.id);
+        }
+        (userProfile as { is_active?: boolean }).is_active = true;
+      } else if (p.suspended_until) {
+        throw new ForbiddenError(`Your account is suspended until ${new Date(p.suspended_until).toISOString().slice(0, 10)}${p.suspension_reason ? `: ${p.suspension_reason}` : ''}`);
+      } else {
+        throw new ForbiddenError(p.suspension_reason ? `Your account is suspended: ${p.suspension_reason}` : 'Your account has been deactivated');
+      }
     }
 
     logger.debug('User profile fetched successfully', { userId: user.id, hasRoles: !!userProfile.user_roles });

@@ -22,7 +22,8 @@ export default function ManagerTeamPage() {
   const { userProfile } = useAuth();
   const perms = profilePermissions(userProfile as any);
   const isSuper = isSuperadminProfile(userProfile as any);
-  const canInvite = isSuper || perms.has('manage_user_roles');
+  // Role managers invite anyone; project managers invite into their own projects (roles up to their own)
+  const canInvite = isSuper || perms.has('manage_user_roles') || perms.has('manage_projects');
   const canDeactivate = isSuper || perms.has('manage_users');
   const [week, setWeek] = useState(() => format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd'));
   const { data, error, isLoading, mutate } = useSWR(`/api/manager/team?weekStart=${week}`, jsonFetcher);

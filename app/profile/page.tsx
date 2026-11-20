@@ -24,6 +24,7 @@ export default function ProfilePage() {
     name: '',
     email: '',
     bio: '',
+    phone: '',
     skills: [] as string[],
   })
   const [newSkill, setNewSkill] = useState('')
@@ -53,6 +54,7 @@ export default function ProfilePage() {
         name: (userProfile as any).name || '',
         email: (userProfile as any).email || '',
         bio: (userProfile as any).bio || '',
+        phone: (userProfile as any).phone || '',
         skills: (userProfile as any).skills || [],
       })
     }
@@ -83,6 +85,7 @@ export default function ProfilePage() {
       await updateUserProfile({
         name: formData.name,
         bio: formData.bio,
+        phone: formData.phone,
         skills: formData.skills,
       })
       
@@ -324,6 +327,20 @@ export default function ProfilePage() {
                   />
                   <p className="text-xs text-muted-foreground">Email cannot be changed from your profile</p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone (WhatsApp)</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => { setFormData(prev => ({ ...prev, phone: e.target.value })); }}
+                  disabled={!isEditing}
+                  placeholder="+91 98765 43210"
+                  maxLength={20}
+                />
+                <p className="text-xs text-muted-foreground">Used for WhatsApp messages from your team. Only people on your projects and administrators can see it.</p>
               </div>
 
               <div className="space-y-2">

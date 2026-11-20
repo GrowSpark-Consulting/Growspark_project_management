@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createApiSupabaseClient, createAdminSupabaseClient } from '@/lib/supabase-server';
-import { requireAuthentication, requirePermission, handleGuardError } from '@/lib/server-guards';
-import { Permission } from '@/lib/permissions';
+import { requireAuthentication, handleGuardError } from '@/lib/server-guards';
+import { invitationAuthority } from '@/lib/invitation-access';
 import { sendEmail } from '@/lib/email/mailer';
 import { invitationEmailTemplate } from '@/lib/email/templates/invitation';
 import { logger } from '@/lib/debug-logger';
@@ -18,7 +18,10 @@ export async function POST(
     // Auth + permission check
     const user = await requireAuthentication(request);
     const supabase = createApiSupabaseClient(request);
-    await requirePermission(user, Permission.MANAGE_USER_ROLES, {}, supabase);
+    const authority = await invitationAuthority(user, supabase);
+    if (!authority) {
+      return NextResponse.json({ error: "You don't have permission to manage invitations" }, { status: 403 });
+    }
 
     // Use admin client to bypass RLS
     const adminSupabase = createAdminSupabaseClient();
@@ -36,6 +39,9 @@ export async function POST(
     if (fetchError || !invitation) {
       logger.error('Invitation not found for resend', { invitationId: id, error: fetchError?.message });
       return NextResponse.json({ error: 'Invitation not found' }, { status: 404 });
+    }
+    if (authority === 'own' && invitation.invited_by !== user.id) {
+      return NextResponse.json({ error: 'You can only manage invitations you sent' }, { status: 403 });
     }
 
     if (invitation.status !== 'pending') {

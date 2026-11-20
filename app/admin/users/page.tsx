@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { jsonFetcher, apiSend, errorMessage, formatDay } from '@/lib/client-api';
@@ -22,6 +23,21 @@ export default function AdminUsersPage() {
     (showInactive || u.is_active !== false) &&
     (!q.trim() || `${u.name} ${u.email} ${u.account_name || ''}`.toLowerCase().includes(q.toLowerCase()))
   ), [data, q, showInactive]);
+
+  // Suspend: temporary deactivation with a reason and an optional end date
+  const [suspending, setSuspending] = useState<any | null>(null);
+  const [suspendReason, setSuspendReason] = useState('');
+  const [suspendUntil, setSuspendUntil] = useState('');
+  const suspend = async () => {
+    try {
+      await apiSend(`/api/users/${suspending.id}/status`, 'POST', {
+        action: 'suspend', reason: suspendReason.trim(), until: suspendUntil ? new Date(`${suspendUntil}T23:59:59`).toISOString() : null,
+      });
+      toast.success(`${suspending.name} suspended`);
+      setSuspending(null); setSuspendReason(''); setSuspendUntil('');
+      mutate();
+    } catch (e) { toast.error(errorMessage(e)); }
+  };
 
   const toggle = async (u: any) => {
     const next = u.is_active === false;
@@ -67,9 +83,14 @@ export default function AdminUsersPage() {
                     <td className="text-gray-600">{u.email}</td>
                     <td>{u.is_client ? 'Client' : 'Employee'}</td>
                     <td className="text-xs text-gray-600">{u.is_client ? u.account_name || '—' : u.roles.join(', ') || 'No role'}</td>
-                    <td>{u.is_active === false ? <Badge className="border-0 bg-red-100 text-red-800">Deactivated</Badge> : <Badge className="border-0 bg-green-100 text-green-800">Active</Badge>}</td>
+                    <td>{u.is_active === false
+                      ? (u.suspension_reason
+                        ? <span title={u.suspension_reason}><Badge variant="warning">Suspended{u.suspended_until ? ` until ${formatDay(u.suspended_until)}` : ''}</Badge></span>
+                        : <Badge className="border-0 bg-red-100 text-red-800">Deactivated</Badge>)
+                      : <Badge className="border-0 bg-green-100 text-green-800">Active</Badge>}</td>
                     <td className="text-xs text-gray-500">{formatDay(u.created_at)}</td>
                     <td className="pr-2 text-right">
+                      {!u.is_superadmin && u.is_active !== false && <Button size="sm" variant="ghost" className="mr-1" onClick={() => setSuspending(u)}>Suspend</Button>}
                       {!u.is_superadmin && <Button size="sm" variant={u.is_active === false ? 'default' : 'outline'} onClick={() => toggle(u)}>{u.is_active === false ? 'Reactivate' : 'Deactivate'}</Button>}
                     </td>
                   </tr>
@@ -80,6 +101,29 @@ export default function AdminUsersPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!suspending} onOpenChange={(o) => { if (!o) setSuspending(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Suspend {suspending?.name}</DialogTitle>
+            <DialogDescription>They can't sign in or use the app until the end date, or until you reactivate them.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label htmlFor="suspend-reason" className="text-sm font-medium">Reason</label>
+              <Input id="suspend-reason" value={suspendReason} maxLength={500} onChange={(e) => setSuspendReason(e.target.value)} placeholder="For example: on leave, under review" />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="suspend-until" className="text-sm font-medium">Until <span className="font-normal text-ink-muted">(optional)</span></label>
+              <Input id="suspend-until" type="date" value={suspendUntil} min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)} onChange={(e) => setSuspendUntil(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setSuspending(null)}>Cancel</Button>
+            <Button onClick={suspend} disabled={!suspendReason.trim()}>Suspend</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

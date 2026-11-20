@@ -30,16 +30,16 @@ export function LoginForm({
   mode = 'login',
   ...props
 }: LoginFormProps) {
-  const [email, setEmail] = useState('')
+  const _router = useRouter()
+  const searchParams = useSearchParams()
+  // ?email= is filled in when registration created the account but couldn't sign in automatically
+  const [email, setEmail] = useState(() => searchParams.get('email') ?? '')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [isSignUp, setIsSignUp] = useState(mode === 'signup')
-  
-  const _router = useRouter()
-  const searchParams = useSearchParams()
   const rawRedirect = searchParams.get('redirectTo') ?? '/'
   // Prevent open redirect: only allow internal paths
   const redirectTo = (rawRedirect.startsWith('/') && !rawRedirect.startsWith('//')) ? rawRedirect : '/'
@@ -67,9 +67,12 @@ export function LoginForm({
         const { user } = await signInWithEmail(email, password)
         if (user) {
           setMessage('Login successful! Redirecting...')
-          // Use window.location.href for a full page reload to ensure auth state is properly updated
+          // The page (/login or /) sends the user to their portal as soon as the profile loads.
+          // This is only a fallback: navigate only if we are still on the page we signed in from,
+          // otherwise this second navigation would interrupt the portal that just opened.
+          const signedInFrom = window.location.pathname
           setTimeout(() => {
-            window.location.href = redirectTo
+            if (window.location.pathname === signedInFrom) window.location.href = redirectTo
           }, 1500)
         }
       }
@@ -88,6 +91,8 @@ export function LoginForm({
         errorMessage = 'Email already in use. Please try logging in instead.'
       } else if (err.message?.includes('Invalid login credentials')) {
         errorMessage = 'Invalid email or password. Please check your credentials and try again.'
+      } else if (err.message?.includes('User is banned')) {
+        errorMessage = 'This account is suspended or deactivated. Contact your manager.'
       } else if (err.message?.includes('Email not confirmed')) {
         errorMessage = 'Please check your email and click the confirmation link before logging in.'
       } else if (err.message?.includes('Password should be at least')) {
@@ -217,15 +222,12 @@ export function LoginForm({
                       </>
                     ) : (
                       <>
-                        Don&apos;t have an account?{' '}
-                        <button
-                          type="button"
-                          onClick={() => { setIsSignUp(true); }}
-                          className="underline-offset-4 hover:underline"
-                          disabled={isLoading}
-                        >
-                          Sign up
-                        </button>
+                        New company?{' '}
+                        <a href="/signup" className="underline-offset-4 hover:underline">
+                          Create a workspace
+                        </a>
+                        <br />
+                        <span className="text-xs">Employees and clients: open the invitation link your manager sent you.</span>
                       </>
                     )}
                   </FieldDescription>

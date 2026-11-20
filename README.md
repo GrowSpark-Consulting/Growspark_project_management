@@ -133,8 +133,8 @@ Then start the app:
 npm run dev                 # http://localhost:3100
 ```
 
-- **First superadmin:** on first launch the app opens `/onboarding` to create one. The one-time setup token is printed in the terminal.
-- **Everyone else:** invite them from **Administration › Invitations**.
+- **First manager:** on a new installation the app opens `/signup`. Registering the company creates the workspace and its manager (superadmin), signs you in and opens the Manager dashboard with a setup checklist. Registration then closes. Optionally require a code with `REGISTRATION_CODE`.
+- **Everyone else:** employees and clients join by invitation only (Manager › Team › Invite employee, or Administration › Invitations / Client portal). Public self-sign-up is switched off in Supabase Auth.
 - **Emails:** in local development they go to Mailpit instead of real inboxes.
 
 ### Local services
@@ -186,6 +186,7 @@ npm run dev                 # http://localhost:3100
 |---|---|
 | `npm run test:db` | Database tests on an in-memory Postgres (no Docker needed): migrations from a clean database, row-level security and triggers as real users, code-vs-schema drift, UI-to-API wiring. See [tests/db/README.md](tests/db/README.md). |
 | `npm run e2e:local` | End-to-end API flows as 9 real test users against the running app and local Docker Supabase (seeds its own data). See [tests/local-e2e/README.md](tests/local-e2e/README.md). |
+| `npm run e2e:local:registration` | **Resets the local database**, then tests company registration on a brand-new installation (browser + API) and re-creates the test users |
 | `npm run e2e:local:browser` | Browser pass: login as each role, landing page and role guards, every main screen (screenshots in `tests/local-e2e/output/`) |
 | `npm run e2e:local:build` / `npm run e2e:local:start` | Production build and server using the **local** Supabase settings, for testing in production mode without touching hosted keys. Rebuild normally before deploying. |
 | `npm test` | Unit tests (Vitest) |

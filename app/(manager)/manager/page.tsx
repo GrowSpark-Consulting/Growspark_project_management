@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatCard, type StatDeltaTone } from '@/components/ui/stat-card';
+import { OnboardingChecklist } from '@/components/manager/onboarding-checklist';
 import { jsonFetcher, errorMessage, formatDay, timeAgo } from '@/lib/client-api';
 import { downloadCsv } from '@/lib/csv';
 import { statusLabel } from '@/lib/task-rules';
@@ -53,6 +54,7 @@ export default function ManagerOverviewPage() {
 
   return (
     <div className="space-y-6">
+      <OnboardingChecklist />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Manager Overview</h1>

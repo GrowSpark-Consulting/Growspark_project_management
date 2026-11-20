@@ -206,7 +206,8 @@ export const PermissionDefinitions: Record<Permission, { name: string; descripti
   [Permission.VIEW_ALL_UPDATES]: {
     name: 'View All Updates (Deprecated)',
     description: 'Not enforced — project access grants sub-resource access via userHasProjectAccess().',
-    category: 'Deprecated'
+    category: 'Deprecated',
+    isOverride: true
   },
 
   // ========================================
@@ -333,7 +334,8 @@ export const PermissionDefinitions: Record<Permission, { name: string; descripti
   [Permission.MANAGE_ALL_WORKFLOWS]: {
     name: 'Manage All Workflows (Deprecated)',
     description: 'Not enforced — no org-wide workflow restrictions exist.',
-    category: 'Deprecated'
+    category: 'Deprecated',
+    isOverride: true
   },
 
   // ========================================

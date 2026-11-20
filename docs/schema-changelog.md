@@ -10,6 +10,30 @@ A short record of every database change, so the Sales & CRM and People & HR team
 
 ---
 
+## 2026-11-22: Company registration finishes in one transaction
+
+| Migration | Change |
+|---|---|
+| `20261122000900_complete_workspace_registration.sql` | Function `complete_workspace_registration(user_id, email, name, phone)`, SECURITY DEFINER, executable by `service_role` only. Within a held registration claim, writes the manager's profile (superadmin, active), the Superadmin role and `app_settings.registered_by` together or not at all. Refuses (55000) with no claim, an already finished registration, or other users present. Used by `POST /api/register`; see `docs/onboarding-auth-plan.md` §8. |
+
+**Compatibility:** additive (one function, no table changes). Applied to local Docker only.
+
+## 2026-11-22: Onboarding, security and planning (9 migrations)
+
+| Migration | Change |
+|---|---|
+| `20261122000000_workflow_and_status_notifications.sql` | Triggers `notify_workflow_step_active` (on `workflow_active_steps`) and `notify_client_project_status` (on `projects.status`): the assignee or role holders are told when a workflow step reaches them; clients are told when a client-approval step needs them and when a shared project's status changes. |
+| `20261122000100_form_templates_fields_active.sql` | `form_templates.is_active` (default true) and a read-only `fields` column derived from `schema` (D-5). |
+| `20261122000200_audit_log.sql` | New table `audit_log` (append-only, superadmin-readable, server-written). Records superadmin / override access to projects and account status changes (SEC-12). |
+| `20261122000300_task_dependency_start_guard.sql` | Trigger `enforce_dependencies_before_start` on `tasks`: a task can't move to In Progress while a task it depends on isn't done (project managers may override). |
+| `20261122000400_project_board_columns.sql` | `projects.board_columns jsonb`: per-project names, order, visibility and WIP limits for the six status columns. |
+| `20261122000500_role_escalation_guard.sql` | Triggers on `user_roles` and `roles` plus `caller_holds_permissions(jsonb)`: only superadmins assign system roles or change a superadmin's roles; nobody else changes their own roles; roles can only be assigned or edited within the caller's own permissions. |
+| `20261122000600_workspace_registration.sql` | `app_settings`: `workspace_name`, `workspace_slug` (format-checked), `company_phone`, `registered_at`, `registered_by`, `terms_version`, `terms_accepted_at`, `onboarding jsonb`. |
+| `20261122000700_invitation_projects.sql` | `user_invitations`: `project_ids uuid[]` (joined on acceptance), `phone`, `revoked_at`, `revoked_by`. |
+| `20261122000800_user_suspension.sql` | `user_profiles.suspended_until`, `suspension_reason`; both added to the privileged columns users can't change on their own profile. |
+
+**Compatibility:** all additive. The role-escalation guard refuses role changes that were previously allowed; the only legitimate case affected is a non-superadmin assigning a role with more permissions than their own.
+
 ## 2026-11-21: Project managers can start workflows
 
 Migration: `20261121000100_workflow_instance_select_policy.sql`

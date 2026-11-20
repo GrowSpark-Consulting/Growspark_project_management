@@ -40,7 +40,8 @@ import { WorkflowProgress } from '@/components/workflow-progress'
 import TaskDetailDialog from '@/components/task/task-detail-dialog'
 import { TaskStatusBadge } from '@/components/task/task-status-badge'
 import ProjectExtras from '@/components/project/project-extras'
-import { TASK_STATUSES, TASK_STATUS_META, normalizeStatus } from '@/lib/task-rules'
+import { TASK_STATUS_META, normalizeStatus } from '@/lib/task-rules'
+import { normalizeBoardColumns, type BoardColumn } from '@/lib/board-columns'
 
 type Project = any
 type Account = any
@@ -302,6 +303,34 @@ export default function ProjectDetailPage() {
     if (taskParam) setDetailTaskId(taskParam)
   }, [projectId])
   const [kanbanDialogOpen, setKanbanDialogOpen] = useState(false)
+  // Task board columns for this project (rename / reorder / hide / WIP limit; project managers edit)
+  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>(normalizeBoardColumns(null))
+  const [boardCanManage, setBoardCanManage] = useState(false)
+  const [boardEditOpen, setBoardEditOpen] = useState(false)
+  const [boardDraft, setBoardDraft] = useState<BoardColumn[]>([])
+  const [boardSaving, setBoardSaving] = useState(false)
+  useEffect(() => {
+    if (!kanbanDialogOpen) return
+    fetch(`/api/projects/${projectId}/board`).then((r) => (r.ok ? r.json() : null)).then((b) => {
+      if (b?.data) { setBoardColumns(b.data.columns); setBoardCanManage(!!b.data.canManage) }
+    }).catch(() => {})
+  }, [kanbanDialogOpen, projectId])
+  const saveBoard = async (reset = false) => {
+    setBoardSaving(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/board`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reset ? { reset: true } : { columns: boardDraft }) })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Could not save the columns')
+      setBoardColumns(body.data.columns)
+      setBoardEditOpen(false)
+      toast.success(reset ? 'Board reset to the default columns' : 'Board columns saved')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not save the columns') } finally { setBoardSaving(false) }
+  }
+  const moveDraft = (i: number, dir: -1 | 1) => setBoardDraft((d) => {
+    const j = i + dir
+    if (j < 0 || j >= d.length) return d
+    const n = [...d]; [n[i], n[j]] = [n[j], n[i]]; return n
+  })
 
   // Confirmation dialogs
   const [deleteTaskDialogOpen, setDeleteTaskDialogOpen] = useState(false)
@@ -311,6 +340,19 @@ export default function ProjectDetailPage() {
   const [teamMemberToRemove, setTeamMemberToRemove] = useState<string | null>(null)
   const [ganttDialogOpen, setGanttDialogOpen] = useState(false)
   const [ganttViewMode, setGanttViewMode] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly'>('weekly')
+  // Gantt: milestones, dependencies and the dependency-driven reschedule (project managers only)
+  const [ganttSchedule, setGanttSchedule] = useState<{ milestones: any[]; dependencies: { task_id: string; depends_on_task_id: string }[]; conflicts: any[]; suggestions: any[] } | null>(null)
+  const [ganttCanManage, setGanttCanManage] = useState(false)
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  const [rescheduling, setRescheduling] = useState(false)
+  const loadGanttSchedule = useCallback(async () => {
+    try {
+      const [sr, ar] = await Promise.all([fetch(`/api/projects/${projectId}/schedule`), fetch(`/api/projects/${projectId}/access`)])
+      if (sr.ok) setGanttSchedule((await sr.json()).data)
+      if (ar.ok) setGanttCanManage(!!(await ar.json()).data?.canManage)
+    } catch { /* the chart still works without them */ }
+  }, [projectId])
+  useEffect(() => { if (ganttDialogOpen) loadGanttSchedule() }, [ganttDialogOpen, loadGanttSchedule])
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [projectLevelHours, setProjectLevelHours] = useState<number>(0) // Hours logged directly to project (no task)
 
@@ -483,6 +525,18 @@ export default function ProjectDetailPage() {
     setCanEditTasks(true)
     loadTasks()
   }, [userProfile, projectId, loadTasks])
+
+  const applyReschedule = async () => {
+    setRescheduling(true)
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schedule`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply: true }) })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Could not reschedule')
+      toast.success(`${body.data?.changes?.length || 0} task(s) rescheduled`)
+      setRescheduleOpen(false)
+      await Promise.all([loadTasks(), loadGanttSchedule()])
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not reschedule') } finally { setRescheduling(false) }
+  }
 
   useEffect(() => {
     const loadProject = async () => {
@@ -3233,22 +3287,33 @@ export default function ProjectDetailPage() {
                 <LayoutGrid className="w-5 h-5" />
                 Task Kanban Board - {project.name}
               </DialogTitle>
-              <p className="text-sm text-gray-500">Drag and drop tasks between columns to update their status</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-gray-500">Drag and drop tasks between columns to update their status</p>
+                {boardCanManage && (
+                  <Button size="sm" variant="outline" onClick={() => { setBoardDraft(boardColumns.map((c) => ({ ...c }))); setBoardEditOpen(true) }}>Customize columns</Button>
+                )}
+              </div>
+              {boardColumns.some((c) => c.hidden) && (() => {
+                const hiddenCount = tasks.filter((t: any) => boardColumns.find((c) => c.status === normalizeStatus(t.status))?.hidden).length
+                return hiddenCount > 0 ? <p className="text-xs text-gray-500">{hiddenCount} task(s) are in hidden columns.</p> : null
+              })()}
             </DialogHeader>
             <div className="flex-1 overflow-x-auto overflow-y-auto pb-4">
               <div className="flex gap-4 min-w-max h-full">
-                {TASK_STATUSES.map((status: string) => {
+                {boardColumns.filter((c) => !c.hidden).map((col) => {
+                  const status: string = col.status
                   const statusTasks = tasks.filter((t: any) => normalizeStatus(t.status) === status)
                   const meta = TASK_STATUS_META[status]
-                  const statusInfo = { label: meta.label, color: meta.column, dropColor: meta.dropColumn }
+                  const statusInfo = { label: col.label, color: meta.column, dropColor: meta.dropColumn }
+                  const overLimit = col.wip_limit != null && statusTasks.length > col.wip_limit
 
                   return (
                     <div key={status} className="flex-shrink-0 w-80 flex flex-col">
                       <div className={`rounded-t-lg p-3 ${statusInfo.color}`}>
                         <div className="flex items-center justify-between">
                           <h3 className="font-medium text-sm">{statusInfo.label}</h3>
-                          <Badge variant="secondary" className="text-xs">
-                            {statusTasks.length}
+                          <Badge variant={overLimit ? 'danger' : 'secondary'} className="text-xs" title={col.wip_limit ? `Work-in-progress limit: ${col.wip_limit}` : undefined}>
+                            {statusTasks.length}{col.wip_limit ? ` / ${col.wip_limit}` : ''}
                           </Badge>
                         </div>
                       </div>
@@ -3377,8 +3442,16 @@ export default function ProjectDetailPage() {
                       ))}
                     </div>
                   </div>
+                  {ganttCanManage && (
+                    <Button size="sm" variant={ganttSchedule?.suggestions?.length ? 'default' : 'outline'} onClick={() => setRescheduleOpen(true)} disabled={!ganttSchedule?.suggestions?.length} title={ganttSchedule?.suggestions?.length ? 'Move tasks that start before their dependencies finish' : 'Every task already starts after its dependencies'}>
+                      Reschedule from dependencies{ganttSchedule?.suggestions?.length ? ` (${ganttSchedule.suggestions.length})` : ''}
+                    </Button>
+                  )}
                   <div className="flex items-center gap-3 text-xs text-gray-500">
                     <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-100 border border-red-300 rounded"></span> Weekend</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rotate-45 bg-amber-500"></span> Milestone</span>
+                    <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-slate-500"></span> Dependency</span>
+                    <span className="flex items-center gap-1"><span className="w-3 border-t-2 border-red-500"></span> Conflict</span>
                     <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-500 rounded"></span> Today</span>
                   </div>
                 </div>
@@ -3687,12 +3760,105 @@ export default function ProjectDetailPage() {
                               </div>
                             )
                           })}
+
+                          {/* Dependencies (end of predecessor to start of successor; red when the successor starts too early) and milestones */}
+                          <svg className="absolute left-0 top-0 pointer-events-none" width={timelineWidth} height={Math.max(totalRowsHeight, 200)} style={{ zIndex: 6 }}>
+                            <defs>
+                              <marker id="dep-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b" /></marker>
+                              <marker id="dep-arrow-bad" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#ef4444" /></marker>
+                            </defs>
+                            {(ganttSchedule?.dependencies || []).map((dep, k) => {
+                              const pi = tasks.findIndex((t: any) => t.id === dep.depends_on_task_id)
+                              const si = tasks.findIndex((t: any) => t.id === dep.task_id)
+                              if (pi < 0 || si < 0) return null
+                              const pp = getTaskPixelPosition(tasks[pi]), sp = getTaskPixelPosition(tasks[si])
+                              if (!pp || !sp) return null
+                              const x1 = pp.left + pp.width, y1 = pi * rowHeight + rowHeight / 2
+                              const x2 = sp.left, y2 = si * rowHeight + rowHeight / 2
+                              const bad = x2 < x1
+                              const mid = bad ? x1 + 10 : Math.max(x1 + 8, Math.min(x2 - 8, x1 + 12))
+                              return <path key={k} d={`M${x1},${y1} H${mid} V${y2} H${x2}`} fill="none" stroke={bad ? '#ef4444' : '#64748b'} strokeWidth="1.5" markerEnd={bad ? 'url(#dep-arrow-bad)' : 'url(#dep-arrow)'} />
+                            })}
+                            {(ganttSchedule?.milestones || []).map((m: any) => {
+                              const key = String(m.date).slice(0, 10)
+                              const idx = allDays.findIndex((d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === key)
+                              if (idx < 0) return null
+                              const x = idx * dayWidth + dayWidth / 2
+                              return (
+                                <g key={m.id}>
+                                  <title>{`${m.name} (${key})`}</title>
+                                  <line x1={x} x2={x} y1={0} y2={Math.max(totalRowsHeight, 200)} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4 3" />
+                                  <rect x={x - 6} y={2} width={12} height={12} transform={`rotate(45 ${x} 8)`} fill={m.status === 'completed' ? '#16a34a' : '#f59e0b'} />
+                                  <text x={x + 10} y={13} fontSize="11" fill="#92400e">{m.name}</text>
+                                </g>
+                              )
+                            })}
+                          </svg>
                         </div>
                       </div>
                     </div>
                   </div>
                 )
               })()}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Reschedule from dependencies: preview, then apply */}
+        <AlertDialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Reschedule from dependencies</AlertDialogTitle>
+              <AlertDialogDescription>
+                These tasks start before a task they depend on finishes. Applying moves each one later (keeping its length), along with everything that follows it, and tells the assignees.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="max-h-64 overflow-y-auto text-sm space-y-2">
+              {(ganttSchedule?.suggestions || []).map((c: any) => (
+                <div key={c.id} className="rounded border p-2">
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-xs text-gray-600">{c.from_start} → <b>{c.to_start}</b>{c.to_due ? ` (ends ${c.to_due})` : ''} · {c.shift_days} day(s) later · after {c.because.join(', ')}</div>
+                </div>
+              ))}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={rescheduling}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={(e) => { e.preventDefault(); applyReschedule() }} disabled={rescheduling}>{rescheduling ? 'Applying…' : 'Apply'}</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Customize the task board columns */}
+        <Dialog open={boardEditOpen} onOpenChange={setBoardEditOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Customize board columns</DialogTitle>
+              <p className="text-sm text-gray-500">Rename, reorder or hide the status columns and set a work-in-progress limit. Tasks keep their statuses; this only changes how the board looks for everyone on this project.</p>
+            </DialogHeader>
+            <div className="space-y-2">
+              {boardDraft.map((c, i) => (
+                <div key={c.status} className="flex items-center gap-2">
+                  <div className="flex flex-col">
+                    <Button size="sm" variant="ghost" className="h-5 px-1" disabled={i === 0} onClick={() => moveDraft(i, -1)} aria-label="Move up">▲</Button>
+                    <Button size="sm" variant="ghost" className="h-5 px-1" disabled={i === boardDraft.length - 1} onClick={() => moveDraft(i, 1)} aria-label="Move down">▼</Button>
+                  </div>
+                  <Input className="flex-1" value={c.label} maxLength={40} aria-label={`Name for ${TASK_STATUS_META[c.status].label}`}
+                    onChange={(e) => setBoardDraft((d) => d.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)))} />
+                  <span className="w-24 text-xs text-gray-500 truncate" title="Task status">{TASK_STATUS_META[c.status].label}</span>
+                  <Input className="w-20" type="number" min={1} placeholder="Limit" value={c.wip_limit ?? ''} aria-label="Work-in-progress limit"
+                    onChange={(e) => setBoardDraft((d) => d.map((x, k) => (k === i ? { ...x, wip_limit: e.target.value ? Math.max(1, parseInt(e.target.value, 10) || 1) : null } : x)))} />
+                  <label className="flex items-center gap-1 text-xs text-gray-600">
+                    <input type="checkbox" checked={c.hidden} onChange={(e) => setBoardDraft((d) => d.map((x, k) => (k === i ? { ...x, hidden: e.target.checked } : x)))} /> Hide
+                  </label>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between pt-2">
+              <Button variant="ghost" onClick={() => saveBoard(true)} disabled={boardSaving}>Reset to default</Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setBoardEditOpen(false)} disabled={boardSaving}>Cancel</Button>
+                <Button onClick={() => saveBoard(false)} disabled={boardSaving || boardDraft.every((c) => c.hidden) || boardDraft.some((c) => !c.label.trim())}>{boardSaving ? 'Saving…' : 'Save'}</Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

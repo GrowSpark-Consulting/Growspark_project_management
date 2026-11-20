@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { passwordMessage } from '@/lib/registration-rules';
 import { createAdminSupabaseClient } from '@/lib/supabase-server';
 import { logger } from '@/lib/debug-logger';
 import { sendEmail } from '@/lib/email/mailer';
@@ -98,9 +99,11 @@ export async function POST(
       return NextResponse.json({ error: 'Name is too long (max 100 characters)' }, { status: 400 });
     }
 
-    if (!password || typeof password !== 'string' || password.length < 8) {
+    // Same password rule as registration and Supabase Auth (8+ characters with a letter and a number)
+    const passwordError = typeof password === 'string' ? passwordMessage(password) : 'Password is required';
+    if (passwordError) {
       return NextResponse.json(
-        { error: 'Password must be at least 8 characters long' },
+        { error: passwordError },
         { status: 400 }
       );
     }

@@ -75,6 +75,9 @@ export async function POST(
     }, { status: 200 });
   } catch (error: unknown) {
     const message = (error as Error)?.message || '';
+    if (/already been decided/i.test(message)) {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
     if (/not found|not a client approval|not an approval|not active|does not have access/i.test(message)) {
       return NextResponse.json({ error: message }, { status: 400 });
     }

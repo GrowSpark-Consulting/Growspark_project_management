@@ -76,6 +76,8 @@ export async function seed({ quiet = false } = {}) {
       has_completed_onboarding: true,
       is_active: true,
       deactivated_at: null,
+      suspended_until: null,
+      suspension_reason: null,
     }).eq('id', ids[key]), `profile ${p.email}`);
     await admin.from('user_roles').delete().eq('user_id', ids[key]);
     check(await admin.from('user_roles').insert({ user_id: ids[key], role_id: roleId(p.role) }), `role ${p.email}`);
