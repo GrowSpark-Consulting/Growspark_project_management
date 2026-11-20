@@ -20,6 +20,24 @@ function safeName(name: string): string {
   return name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 200) || 'file';
 }
 
+/**
+ * The file name as used in the storage key. Supabase Storage rejects non-ASCII keys ("Invalid key"
+ * for ₹, accented or Hindi names), and the storage client cuts a key at "#" or "?" because it puts the
+ * key in a URL ("Invoice #12.pdf" was stored as "Invoice", so its download failed). The key therefore
+ * gets a plain version; the real name stays in project_files.file_name and is what the user sees and
+ * downloads.
+ */
+export function storageKeyName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot + 1) : '';
+  const plain = (t: string) => t.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ._()-]+/g, '_').replace(/_+/g, '_');
+  let b = plain(base).trim().replace(/^[._ ]+|[._ ]+$/g, '').slice(0, 120);
+  if (!/[A-Za-z0-9]/.test(b)) b = 'file';
+  const e = plain(ext).replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+  return e ? `${b}.${e}` : b;
+}
+
 export async function readUpload(request: NextRequest): Promise<{ file: File; fields: FormData }> {
   let form: FormData;
   try {
@@ -42,7 +60,7 @@ export async function storeProjectFile(
 ) {
   const id = crypto.randomUUID();
   const name = safeName(opts.file.name);
-  const path = `${opts.projectId}/${id}/${name}`;
+  const path = `${opts.projectId}/${id}/${storageKeyName(name)}`;
   const bytes = Buffer.from(await opts.file.arrayBuffer());
   const store = fileStore(admin);
   try {
