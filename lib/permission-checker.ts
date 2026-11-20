@@ -20,6 +20,7 @@ import type { AppSupabaseClient } from './supabase';
 import { UserWithRoles, PermissionContext } from './rbac-types';
 import { Permission } from './permissions';
 import { logger, permissionCheck } from './debug-logger';
+import { profileDepartmentIds } from './department-membership';
 
 
 // Cache for permission checks (expires after 5 minutes)
@@ -141,9 +142,9 @@ export async function isAssignedToProject(userId: string, projectId: string, sup
  * @param supabaseClient - Optional authenticated Supabase client (not used in this function but kept for consistency)
  */
 export async function managesDepartment(userProfile: UserWithRoles | null, departmentId: string, _supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
-  if (!userProfile?.user_roles) return false;
-
-  return userProfile.user_roles.some((ur: any) => ur.roles?.department_id === departmentId);
+  if (!userProfile) return false;
+  // In the department through one of their roles, or added to it directly
+  return profileDepartmentIds(userProfile as never).includes(departmentId);
 }
 
 /**

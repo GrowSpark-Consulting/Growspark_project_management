@@ -2,6 +2,7 @@ import { createServerSupabase } from './supabase-server';
 import { Department, Project } from './supabase';
 import { DEFAULT_WEEKLY_HOURS } from './constants';
 import { logger } from './debug-logger';
+import { departmentMemberIds } from './department-membership';
 
 // Department service for managing department data and analytics
 
@@ -157,36 +158,8 @@ class ServerDepartmentService {
       const supabase = await createServerSupabase();
       if (!supabase) return [];
 
-      // Get all roles for this department
-      const { data: departmentRoles, error: rolesError } = await supabase
-        .from('roles')
-        .select('id')
-        .eq('department_id', departmentId);
-
-      if (rolesError) {
-        logger.error('Error fetching department roles', {}, rolesError as Error);
-        return [];
-      }
-
-      const roleIds = departmentRoles?.map((role: any) => role.id) || [];
-
-      if (roleIds.length === 0) {
-        logger.debug('No roles found for department', { departmentId });
-        return [];
-      }
-
-      // Get user IDs who have roles in this department
-      const { data: usersInDept, error: userRolesError } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .in('role_id', roleIds);
-
-      if (userRolesError) {
-        logger.error('Error fetching users for department', {}, userRolesError as Error);
-        return [];
-      }
-
-      const userIds = Array.from(new Set(usersInDept?.map((ur: any) => ur.user_id) || []));
+      // Everyone in this department: through a department role or added directly
+      const userIds = await departmentMemberIds(supabase, departmentId);
 
       if (userIds.length === 0) {
         logger.debug('No users found for department', { departmentId });
@@ -319,21 +292,11 @@ class ServerDepartmentService {
       return null;
     }
 
-    // Get all roles for this department first (we need role IDs to find assignments)
-    const { data: departmentRoles, error: rolesQueryError } = await supabase
-      .from('roles')
-      .select('id')
-      .eq('department_id', departmentId);
+    // Everyone in this department: through a department role or added directly
+    const userIds = await departmentMemberIds(supabase, departmentId);
 
-    if (rolesQueryError) {
-      logger.error('Error fetching department roles for projects', {}, rolesQueryError as Error);
-      return null;
-    }
-
-    const roleIds = departmentRoles?.map((role: any) => role.id) || [];
-
-    // If department has no roles, it has no projects
-    if (roleIds.length === 0) {
+    // A department with nobody in it has no projects
+    if (userIds.length === 0) {
       const _activeProjects: Record<string, unknown>[] = [];
       const _teamSize = 0;
       return {
@@ -348,19 +311,6 @@ class ServerDepartmentService {
         recentProjects: []
       };
     }
-
-    // Get user IDs who have roles in this department
-    const { data: usersInDept, error: userRolesQueryError } = await supabase
-      .from('user_roles')
-      .select('user_id')
-      .in('role_id', roleIds);
-
-    if (userRolesQueryError) {
-      logger.error('Error fetching users for department', {}, userRolesQueryError as Error);
-      return null;
-    }
-
-    const userIds = Array.from(new Set(usersInDept?.map((ur: any) => ur.user_id) || []));
 
     // Get projects where users from this department are assigned
     // Filter by department's user IDs directly instead of fetching all assignments
@@ -429,19 +379,8 @@ class ServerDepartmentService {
       projects = projectsData || [];
     }
 
-    // Get user roles for those specific roles (roleIds already fetched above)
-    // Split into separate queries to avoid nested PostgREST issues
-    const { data: userRolesData, error: userRolesError } = await supabase
-      .from('user_roles')
-      .select('user_id, role_id')
-      .in('role_id', roleIds);
-
-    if (userRolesError) {
-      logger.error('Error fetching user roles for department metrics', {}, userRolesError as Error);
-    }
-
-    // Get user profiles separately
-    const userProfileIds = Array.from(new Set(userRolesData?.map((ur: any) => ur.user_id) || []));
+    // Team members: everyone in the department (role-based and direct), profiles fetched separately
+    const userProfileIds = userIds;
     let teamMembers: Record<string, unknown>[] = [];
 
     if (userProfileIds.length > 0) {

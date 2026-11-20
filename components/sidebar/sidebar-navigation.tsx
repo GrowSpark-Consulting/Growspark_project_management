@@ -14,6 +14,7 @@ import {
   hasAnyPermissionSync,
   ComputedPermissions
 } from '@/lib/permission-utils';
+import { profileDepartments } from '@/lib/department-membership';
 import {
   LayoutDashboard,
   Building2,
@@ -224,26 +225,8 @@ export function SidebarNavigation() {
   }, []);
 
   // Get user departments
-  const getUserDepartments = () => {
-    if (!userProfile?.user_roles) return [];
-    try {
-      const deptMap = new Map<string, { id: string; name: string }>();
-
-      userProfile.user_roles.forEach((ur: any) => {
-        const dept = ur.roles?.departments;
-        if (dept?.id && !deptMap.has(dept.id)) {
-          deptMap.set(dept.id, {
-            id: dept.id,
-            name: dept.name
-          });
-        }
-      });
-
-      return Array.from(deptMap.values());
-    } catch {
-      return [];
-    }
-  };
+  // Departments through the user's roles or added directly (department_members)
+  const getUserDepartments = () => profileDepartments(userProfile as never);
 
   // Check permissions for navigation items
   useEffect(() => {

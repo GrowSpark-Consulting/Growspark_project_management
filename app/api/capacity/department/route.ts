@@ -10,6 +10,7 @@ import { DEFAULT_WEEKLY_HOURS } from '@/lib/constants';
 import { hasPermission } from '@/lib/permission-checker';
 import { Permission } from '@/lib/permissions';
 import { logger } from '@/lib/debug-logger';
+import { departmentMemberIds } from '@/lib/department-membership';
 
 // Type definitions
 interface ErrorWithMessage extends Error {
@@ -73,38 +74,8 @@ export async function GET(request: NextRequest) {
     const earliestDate = ranges[0].startDate;
     const latestDate = ranges[ranges.length - 1].endDate;
 
-    // Get all roles in this department
-    const { data: departmentRoles } = await supabase
-      .from('roles')
-      .select('id')
-      .eq('department_id', departmentId);
-
-    const roleIds = (departmentRoles || []).map((r: any) => r.id);
-
-    if (roleIds.length === 0) {
-      // No roles in department, return empty data
-      return NextResponse.json({
-        success: true,
-        data: ranges.map((r: any) => ({
-          label: r.label,
-          startDate: r.startDate,
-          endDate: r.endDate,
-          available: 0,
-          allocated: 0,
-          actual: 0,
-          utilization: 0,
-        })),
-        period,
-      });
-    }
-
-    // Get all users with these roles
-    const { data: userRolesData } = await supabase
-      .from('user_roles')
-      .select('user_id')
-      .in('role_id', roleIds);
-
-    const userIds = Array.from(new Set((userRolesData || []).map((ur: any) => ur.user_id as string)));
+    // Everyone in this department: through a department role or added directly
+    const userIds = await departmentMemberIds(supabase, departmentId);
 
     if (userIds.length === 0) {
       return NextResponse.json({

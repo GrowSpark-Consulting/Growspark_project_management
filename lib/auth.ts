@@ -2,6 +2,7 @@
 import { createClientSupabase } from './supabase';
 import { UserProfile, UserRole, Role, Department } from './supabase';
 import { logger } from './debug-logger';
+import { loadDirectMemberships, type DirectMembership } from './department-membership';
 
 // Authentication helper functions
 
@@ -164,6 +165,9 @@ export async function getCurrentUserProfile() {
       return null;
     }
 
+    // Departments the user was added to directly (separate query: never blocks sign-in)
+    profile.department_members = await loadDirectMemberships(supabase, user.id);
+
     // Type the return properly
     return profile as UserProfile & {
       user_roles: (UserRole & {
@@ -171,6 +175,7 @@ export async function getCurrentUserProfile() {
           departments: Department;
         };
       })[];
+      department_members: DirectMembership[];
     };
   } catch (error: unknown) {
     logger.error('Error in getCurrentUserProfile', {}, error as Error);

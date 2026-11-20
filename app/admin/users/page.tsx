@@ -19,7 +19,8 @@ export default function AdminUsersPage() {
   const [q, setQ] = useState('');
   const [showInactive, setShowInactive] = useState(true);
   const { data, error, isLoading, mutate } = useSWR(`/api/admin/users?type=${type}`, jsonFetcher);
-  const users: any[] = useMemo(() => (data?.data || []).filter((u: any) =>
+  const allDepartments: { id: string; name: string }[] = data?.data?.departments || [];
+  const users: any[] = useMemo(() => (data?.data?.users || []).filter((u: any) =>
     (showInactive || u.is_active !== false) &&
     (!q.trim() || `${u.name} ${u.email} ${u.account_name || ''}`.toLowerCase().includes(q.toLowerCase()))
   ), [data, q, showInactive]);
@@ -37,6 +38,21 @@ export default function AdminUsersPage() {
       setSuspending(null); setSuspendReason(''); setSuspendUntil('');
       mutate();
     } catch (e) { toast.error(errorMessage(e)); }
+  };
+
+  // Departments: the person is added directly (department_members); departments of their roles are shown, not edited here
+  const [editingDepts, setEditingDepts] = useState<any | null>(null);
+  const [deptSelection, setDeptSelection] = useState<string[]>([]);
+  const [savingDepts, setSavingDepts] = useState(false);
+  const openDepartments = (u: any) => { setEditingDepts(u); setDeptSelection(u.department_ids || []); };
+  const saveDepartments = async () => {
+    setSavingDepts(true);
+    try {
+      await apiSend(`/api/users/${editingDepts.id}/departments`, 'PUT', { departmentIds: deptSelection });
+      toast.success(`Departments updated for ${editingDepts.name}`);
+      setEditingDepts(null);
+      mutate();
+    } catch (e) { toast.error(errorMessage(e)); } finally { setSavingDepts(false); }
   };
 
   const toggle = async (u: any) => {
@@ -74,7 +90,7 @@ export default function AdminUsersPage() {
           {error ? <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p> : isLoading ? <Skeleton className="h-48 m-4" /> : (
             <table className="w-full text-sm min-w-[760px]">
               <thead><tr className="text-left text-xs text-gray-500 border-b bg-gray-50">
-                <th className="p-2">Name</th><th>Email</th><th>Type</th><th>Roles / account</th><th>Status</th><th>Joined</th><th></th>
+                <th className="p-2">Name</th><th>Email</th><th>Type</th><th>Roles / account</th><th>Departments</th><th>Status</th><th>Joined</th><th></th>
               </tr></thead>
               <tbody>
                 {users.map((u) => (
@@ -83,6 +99,9 @@ export default function AdminUsersPage() {
                     <td className="text-gray-600">{u.email}</td>
                     <td>{u.is_client ? 'Client' : 'Employee'}</td>
                     <td className="text-xs text-gray-600">{u.is_client ? u.account_name || '—' : u.roles.join(', ') || 'No role'}</td>
+                    <td className="text-xs text-gray-600">
+                      {u.is_client ? '—' : [...u.departments, ...u.role_departments.map((d: string) => `${d} (role)`)].join(', ') || <span className="text-gray-400">None</span>}
+                    </td>
                     <td>{u.is_active === false
                       ? (u.suspension_reason
                         ? <span title={u.suspension_reason}><Badge variant="warning">Suspended{u.suspended_until ? ` until ${formatDay(u.suspended_until)}` : ''}</Badge></span>
@@ -90,17 +109,50 @@ export default function AdminUsersPage() {
                       : <Badge className="border-0 bg-green-100 text-green-800">Active</Badge>}</td>
                     <td className="text-xs text-gray-500">{formatDay(u.created_at)}</td>
                     <td className="pr-2 text-right">
+                      {!u.is_client && <Button size="sm" variant="ghost" className="mr-1" onClick={() => openDepartments(u)}>Departments</Button>}
                       {!u.is_superadmin && u.is_active !== false && <Button size="sm" variant="ghost" className="mr-1" onClick={() => setSuspending(u)}>Suspend</Button>}
                       {!u.is_superadmin && <Button size="sm" variant={u.is_active === false ? 'default' : 'outline'} onClick={() => toggle(u)}>{u.is_active === false ? 'Reactivate' : 'Deactivate'}</Button>}
                     </td>
                   </tr>
                 ))}
-                {users.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-gray-500">No users found.</td></tr>}
+                {users.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-gray-500">No users found.</td></tr>}
               </tbody>
             </table>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingDepts} onOpenChange={(o) => { if (!o) setEditingDepts(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Departments for {editingDepts?.name}</DialogTitle>
+            <DialogDescription>They see and belong to the departments you tick, whatever their role.</DialogDescription>
+          </DialogHeader>
+          {allDepartments.length === 0 ? (
+            <p className="text-sm text-gray-600">No departments yet. Create one under <Link href="/departments" className="underline">Departments</Link>.</p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto space-y-1 rounded-md border p-2">
+              {allDepartments.map((d) => (
+                <label key={d.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={deptSelection.includes(d.id)}
+                    onChange={(e) => setDeptSelection((sel) => e.target.checked ? [...sel, d.id] : sel.filter((x) => x !== d.id))}
+                  />
+                  {d.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {editingDepts?.role_departments?.length > 0 && (
+            <p className="text-xs text-gray-500">Also in {editingDepts.role_departments.join(', ')} through their role (change the role to change that).</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setEditingDepts(null)}>Cancel</Button>
+            <Button onClick={saveDepartments} disabled={savingDepts || allDepartments.length === 0}>{savingDepts ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!suspending} onOpenChange={(o) => { if (!o) setSuspending(null); }}>
         <DialogContent className="max-w-md">

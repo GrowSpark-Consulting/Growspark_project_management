@@ -67,6 +67,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: refusal }, { status: 403 });
     }
 
+    // Department (optional): the person joins it when they accept (department_members)
+    let department: { id: string; name: string } | null = null;
+    if (departmentId) {
+      const { data: dept } = typeof departmentId === 'string'
+        ? await adminSupabase.from('departments').select('id, name').eq('id', departmentId).maybeSingle()
+        : { data: null };
+      if (!dept) {
+        return NextResponse.json({ error: 'That department does not exist' }, { status: 400 });
+      }
+      department = dept;
+    }
+
     // Check for existing pending invitation for this email
     const { data: existingInvite } = await adminSupabase
       .from('user_invitations')
@@ -154,10 +166,8 @@ export async function POST(request: NextRequest) {
     const appUrl = `${proto}://${host}`;
     const acceptUrl = `${appUrl}/invite/${token}`;
 
-    // Determine department name
-    const deptName = departmentId
-      ? ((role as any).departments?.name || undefined)
-      : undefined;
+    // The department chosen for this person (not the role's)
+    const deptName = department?.name;
 
     // Send invitation email
     const emailContent = invitationEmailTemplate({

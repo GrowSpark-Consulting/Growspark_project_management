@@ -267,7 +267,7 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
 
             {/* Department (optional) */}
             <div className="space-y-2">
-              <Label>Department <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Label>Department <span className="text-gray-400 font-normal">(optional: they join it when they accept)</span></Label>
               <Select
                 value={departmentId}
                 onValueChange={setDepartmentId}

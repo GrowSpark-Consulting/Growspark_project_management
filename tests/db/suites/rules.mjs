@@ -792,6 +792,41 @@ export async function run(report) {
     return { pass: denied(r), info: describe(r) };
   });
 
+  // ---- Direct department membership (department_members)
+  const dept = (await q(`insert into public.departments (name) values ('Tech (members test)') returning id`)).rows[0].id;
+  const addMember = (actor, user) => asUser(actor, () => tryQ(`insert into public.department_members (department_id, user_id, added_by) values ($1,$2,$3)`, [dept, user, actor]));
+  await check('DEPT-member-superadmin', 'A superadmin can add someone to a department', async () => {
+    const r = await addMember(U.admin, U.pm);
+    return { pass: r.ok && r.affected === 1, info: describe(r) };
+  });
+  await check('DEPT-member-role-manager', 'Someone who manages user roles (Executive) can add people to departments', async () => {
+    const r = await addMember(U.viewer, U.emp2);
+    return { pass: r.ok && r.affected === 1, info: describe(r) };
+  });
+  await check('DEPT-member-employee-refused', 'An employee cannot add anyone (or themselves) to a department', async () => {
+    const a = await addMember(U.emp, U.emp);
+    const b = await addMember(U.emp, U.outsider);
+    return { pass: denied(a) && denied(b), info: `self: ${describe(a)}; other: ${describe(b)}` };
+  });
+  await check('DEPT-member-unique', 'The same person cannot be added to the same department twice', async () => {
+    const r = await addMember(U.admin, U.pm);
+    return { pass: code(r, '23505'), info: describe(r) };
+  });
+  await check('DEPT-member-read', 'Staff can see department members; a client sees none of them', async () => {
+    const staff = (await asUser(U.emp, () => tryQ(`select count(*)::int n from public.department_members where department_id = $1`, [dept]))).rows[0]?.n;
+    const client = await asUser(U.client, () => tryQ(`select count(*)::int n from public.department_members`));
+    return { pass: staff === 2 && client.ok && client.rows[0].n === 0, info: `employee sees ${staff}, client sees ${client.rows[0]?.n}` };
+  });
+  await check('DEPT-member-remove', 'Only an admin or role manager can remove a membership', async () => {
+    const byEmp = await asUser(U.emp, () => tryQ(`delete from public.department_members where department_id = $1 and user_id = $2`, [dept, U.emp2]));
+    const byAdmin = await asUser(U.admin, () => tryQ(`delete from public.department_members where department_id = $1 and user_id = $2`, [dept, U.emp2]));
+    return { pass: denied(byEmp) && byAdmin.ok && byAdmin.affected === 1, info: `employee: ${describe(byEmp)}; admin: ${describe(byAdmin)}` };
+  });
+  await check('DEPT-member-cascade', 'Deleting a department removes its memberships', async () => {
+    await q(`delete from public.departments where id = $1`, [dept]);
+    const left = (await q(`select count(*)::int n from public.department_members where department_id = $1`, [dept])).rows[0].n;
+    return { pass: left === 0, info: `${left} left` };
+  });
 
   await db.close();
 }

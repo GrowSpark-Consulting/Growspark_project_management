@@ -23,6 +23,7 @@ import { UserWithRoles } from './rbac';
 import { Permission, PermissionContext } from './permissions';
 import { checkPermissionHybrid, isSuperadmin } from './permission-checker';
 import { logger } from './debug-logger';
+import { loadDirectMemberships } from './department-membership';
 
 // ================================================================================
 // CUSTOM ERROR TYPES
@@ -187,6 +188,9 @@ export async function requireAuthentication(request?: NextRequest): Promise<User
     }
 
     logger.debug('User profile fetched successfully', { userId: user.id, hasRoles: !!userProfile.user_roles });
+
+    // Departments the user was added to directly (separate query: never blocks the request)
+    (userProfile as { department_members?: unknown }).department_members = await loadDirectMemberships(supabase, user.id);
 
     return userProfile as unknown as UserWithRoles;
   } catch (error: unknown) {

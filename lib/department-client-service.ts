@@ -1,6 +1,7 @@
 import { createClientSupabase } from './supabase';
 import { Department, Project } from './supabase';
 import { logger } from './debug-logger';
+import { departmentMemberIds } from './department-membership';
 
 // Client-side department service for managing department data and analytics
 
@@ -177,46 +178,20 @@ class ClientDepartmentService {
       const department = await this.getDepartmentById(departmentId);
       if (!department) return null;
 
-      // First get all roles for this department
-      const { data: departmentRoles, error: rolesError } = await supabase
-        .from('roles')
-        .select('id')
-        .eq('department_id', departmentId);
-
-      if (rolesError) {
-        logger.error('Error fetching department roles', { error: rolesError });
+      // Everyone in this department: through a department role or added directly
+      const userIds = await departmentMemberIds(supabase, departmentId);
+      let teamMembers: Array<{ user_id: string; user_profiles: unknown }> = [];
+      if (userIds.length > 0) {
+        const { data: profiles, error: teamError } = await supabase
+          .from('user_profiles')
+          .select('id, name, image, workload_sentiment')
+          .in('id', userIds);
+        if (teamError) {
+          logger.error('Error fetching team members', { error: teamError });
+          return null;
+        }
+        teamMembers = (profiles || []).map((p: any) => ({ user_id: p.id, user_profiles: p }));
       }
-
-      const roleIds = departmentRoles?.map((role: any) => role.id) || [];
-
-      // Then get user roles for those specific roles
-      const { data: teamMembers, error: teamError } = await supabase
-        .from('user_roles')
-        .select(`
-          user_id,
-          roles!user_roles_role_id_fkey (
-            department_id,
-            departments!roles_department_id_fkey (
-              id,
-              name
-            )
-          ),
-          user_profiles!user_roles_user_id_fkey (
-            id,
-            name,
-            image,
-            workload_sentiment
-          )
-        `)
-        .in('role_id', roleIds);
-
-      if (teamError) {
-        logger.error('Error fetching team members', { error: teamError });
-        return null;
-      }
-
-      // Get user IDs who have roles in this department
-      const userIds = Array.from(new Set(teamMembers?.map((tm: any) => tm.user_id) || []));
 
       let projects: Record<string, unknown>[] = [];
 
@@ -355,36 +330,8 @@ class ClientDepartmentService {
       const supabase = createClientSupabase();
       if (!supabase) return [];
 
-      // Get all roles for this department
-      const { data: departmentRoles, error: rolesError } = await supabase
-        .from('roles')
-        .select('id')
-        .eq('department_id', departmentId);
-
-      if (rolesError) {
-        logger.error('Error fetching department roles', { error: rolesError });
-        return [];
-      }
-
-      const roleIds = departmentRoles?.map((role: any) => role.id) || [];
-
-      if (roleIds.length === 0) {
-        logger.debug('No roles found for department', { departmentId });
-        return [];
-      }
-
-      // Get user IDs who have roles in this department
-      const { data: usersInDept, error: userRolesError } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .in('role_id', roleIds);
-
-      if (userRolesError) {
-        logger.error('Error fetching users for department', { error: userRolesError });
-        return [];
-      }
-
-      const userIds = Array.from(new Set(usersInDept?.map((ur: any) => ur.user_id) || []));
+      // Everyone in this department: through a department role or added directly
+      const userIds = await departmentMemberIds(supabase, departmentId);
 
       if (userIds.length === 0) {
         logger.debug('No users found for department', { departmentId });

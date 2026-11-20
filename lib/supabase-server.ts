@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { logger } from './debug-logger';
+import { loadDirectMemberships } from './department-membership';
 
 // Configure global fetch timeout to prevent connection timeout errors
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -223,6 +224,8 @@ export async function getUserProfileFromRequest(supabase: ReturnType<typeof crea
 
   return {
     ...profile,
-    user_roles: userRoles || []
+    user_roles: userRoles || [],
+    // Departments the user was added to directly (separate query: never blocks the request)
+    department_members: await loadDirectMemberships(supabase, user.id),
   };
 }

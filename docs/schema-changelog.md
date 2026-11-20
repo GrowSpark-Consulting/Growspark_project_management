@@ -18,6 +18,14 @@ A short record of every database change, so the Sales & CRM and People & HR team
 
 **Compatibility:** changes one trigger function; no table changes. Applied to local Docker only.
 
+## 2026-11-22: People join departments directly
+
+| Migration | Change |
+|---|---|
+| `20261122001100_department_members.sql` | New table `department_members (department_id, user_id, added_by, created_at)`, unique per department and person, removed with the department or the user. RLS: staff read (clients only their own rows); add and remove by superadmin, `manage_departments` or `manage_user_roles`; no update; nothing for `anon`. Before, a person was in a department only through a role created inside it, so people with the ready-made roles (Project Manager, Employee, ...) were in no department and the invitation's Department choice had no effect. The app now counts both ways (`lib/department-membership.ts`). The invitation's department is stored on acceptance; the Users page sets departments per person (`PUT /api/users/[id]/departments`). |
+
+**Compatibility:** additive. Role-based membership works as before. The app reads the new table in a separate query that tolerates its absence, so sign-in does not depend on the migration. Applied to local Docker only.
+
 ## 2026-11-22: Account managers can create projects in their account
 
 | Migration | Change |

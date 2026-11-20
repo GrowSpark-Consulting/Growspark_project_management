@@ -26,6 +26,8 @@ export interface UserWithRoles extends UserProfile {
       };
     }
   >;
+  /** Departments the user was added to directly (department_members), besides those of their roles */
+  department_members?: Array<{ department_id: string; departments?: { id: string; name: string } | null }>;
 }
 
 // Permission context for context-aware checks

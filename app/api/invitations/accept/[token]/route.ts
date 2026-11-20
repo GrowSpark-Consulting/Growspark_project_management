@@ -224,6 +224,15 @@ export async function POST(
       }
     }
 
+    // 3c. Join the department chosen in the invitation (whatever the role; see department_members)
+    if (invitation.department_id) {
+      const { error: deptError } = await adminSupabase.from('department_members').upsert(
+        { department_id: invitation.department_id, user_id: userId, added_by: invitation.invited_by },
+        { onConflict: 'department_id,user_id', ignoreDuplicates: true }
+      );
+      if (deptError) logger.error('Failed to add invited user to the department', { error: deptError.message, userId });
+    }
+
     // 4. Update invitation status
     const { error: updateError } = await adminSupabase
       .from('user_invitations')

@@ -1,6 +1,7 @@
 import { createServerSupabase } from './supabase-server';
 import { UserProfile, UserRole, Role, Department } from './supabase';
 import { logger } from './debug-logger';
+import { loadDirectMemberships, type DirectMembership } from './department-membership';
 
 // Server-side authentication helper functions
 
@@ -71,12 +72,16 @@ export async function getCurrentUserProfileServer() {
       return null;
     }
 
+    // Departments the user was added to directly (separate query: never blocks the page)
+    profile.department_members = await loadDirectMemberships(supabase, user.id);
+
     return profile as UserProfile & {
       user_roles: (UserRole & {
         roles: Role & {
           departments: Department;
         };
       })[];
+      department_members: DirectMembership[];
     };
   } catch (error: unknown) {
     logger.error('Error in getCurrentUserProfileServer', {}, error as Error);

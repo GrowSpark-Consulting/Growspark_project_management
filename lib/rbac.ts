@@ -27,6 +27,7 @@ import {
   isAssignedToProject
 } from './permission-checker';
 import { logger } from './debug-logger';
+import { profileDepartmentIds } from './department-membership';
 
 
 // Re-export UserWithRoles for backwards compatibility
@@ -106,8 +107,8 @@ export function getUserDepartments(userProfile: UserWithRoles | null): string[] 
  * @returns Array of department IDs
  */
 export function getUserDepartmentIds(userProfile: UserWithRoles | null): string[] {
-  if (!userProfile?.user_roles) return [];
-  return [...new Set(userProfile.user_roles.map(userRole => userRole.roles.department_id).filter(Boolean))];
+  // Through their roles or added directly (department_members)
+  return profileDepartmentIds(userProfile as never);
 }
 
 /**
