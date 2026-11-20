@@ -64,6 +64,13 @@ export default function ProjectCreationDialog({
   const setOpen = controlledOnOpenChange || setInternalOpen;
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
+  const [accountsLoadFailed, setAccountsLoadFailed] = useState(false);
+  // Inline "new account": a brand-new workspace has no accounts, and every project needs one
+  const [showNewAccount, setShowNewAccount] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<WorkflowTemplate[]>([]);
   const { userProfile } = useAuth();
   const [_canCreateProject, setCanCreateProject] = useState(false);
@@ -127,9 +134,12 @@ export default function ProjectCreationDialog({
           .order('name');
 
         if (accountsError) {
+          setAccountsLoadFailed(true);
           toast.error('Failed to load accounts');
         } else {
+          setAccountsLoadFailed(false);
           setAccounts(accountsData || []);
+          setAccountsLoaded(true);
         }
 
         // Load workflows
@@ -262,6 +272,72 @@ export default function ProjectCreationDialog({
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Create an account without leaving the dialog (POST /api/accounts checks the permission)
+  const createAccount = async () => {
+    const name = newAccountName.trim();
+    if (!name) {
+      setAccountError('Enter the account name.');
+      return;
+    }
+    setAddingAccount(true);
+    setAccountError(null);
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, status: 'active' }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.account?.id) {
+        setAccountError(res.status === 403
+          ? "You don't have permission to add accounts. Ask an administrator, or pick an existing account."
+          : body.error || 'Could not add the account. Please try again.');
+        return;
+      }
+      const account: Account = { id: body.account.id, name: body.account.name };
+      setAccounts(prev => [...prev, account].sort((a, b) => a.name.localeCompare(b.name)));
+      handleInputChange('accountId', account.id);
+      setNewAccountName('');
+      setShowNewAccount(false);
+      toast.success(`Account "${account.name}" added`);
+    } catch {
+      setAccountError('Could not reach the server. Please try again.');
+    } finally {
+      setAddingAccount(false);
+    }
+  };
+
+  // What is still needed before the project can be created (shown next to the button)
+  const missing = [
+    !formData.name.trim() && 'a project name',
+    !formData.accountId && 'an account',
+    !(parseInt(formData.estimatedHours) > 0) && 'estimated hours',
+    formData.startDate && formData.endDate && formData.endDate < formData.startDate && 'an end date after the start date',
+  ].filter(Boolean) as string[];
+  const noAccounts = accountsLoaded && accounts.length === 0;
+
+  const newAccountForm = (
+    <div className="space-y-1.5">
+      <div className="flex gap-2">
+        <Input
+          id="newAccountName"
+          aria-label="New account name"
+          value={newAccountName}
+          onChange={(e) => { setNewAccountName(e.target.value); setAccountError(null); }}
+          // Enter adds the account instead of submitting the project form
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createAccount(); } }}
+          placeholder="Account name, e.g. Acme Corp"
+          maxLength={200}
+          disabled={addingAccount}
+        />
+        <Button type="button" variant="outline" onClick={createAccount} disabled={addingAccount}>
+          {addingAccount ? 'Adding…' : 'Add'}
+        </Button>
+      </div>
+      {accountError && <p role="alert" className="text-xs text-red-600">{accountError}</p>}
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -326,24 +402,44 @@ export default function ProjectCreationDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="account">Account *</Label>
-              <Select
-                value={formData.accountId}
-                onValueChange={(value) => handleInputChange('accountId', value)}
-                required
-              >
-                <SelectTrigger aria-required="true">
-                  <SelectValue placeholder="Select an account" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts
-                    .filter((account:any) => account && account.id && account.id !== '')
-                    .map((account:any) => (
-                      <SelectItem key={account.id} value={account.id}>
-                        {account.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              {noAccounts ? (
+                <div className="rounded-md border border-dashed p-3 space-y-2">
+                  <p className="text-xs text-gray-600">
+                    No accounts yet. Every project belongs to an account: the client, or your own company for internal work. Add one here:
+                  </p>
+                  {newAccountForm}
+                </div>
+              ) : (
+                <>
+                  <Select
+                    // Remount when an account is added: the closed Radix Select does not pick up a newly
+                    // added item, so the just-created account would not show as selected
+                    key={accounts.length}
+                    value={formData.accountId}
+                    onValueChange={(value) => handleInputChange('accountId', value)}
+                    required
+                    disabled={!accountsLoaded}
+                  >
+                    <SelectTrigger aria-required="true">
+                      <SelectValue placeholder={accountsLoaded ? 'Select an account' : accountsLoadFailed ? "Couldn't load accounts" : 'Loading accounts…'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts
+                        .filter((account:any) => account && account.id && account.id !== '')
+                        .map((account:any) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {accountsLoaded && (showNewAccount ? newAccountForm : (
+                    <button type="button" className="text-xs text-primary underline-offset-4 hover:underline" onClick={() => setShowNewAccount(true)}>
+                      + New account
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="workflow">Workflow (Optional)</Label>
@@ -413,6 +509,12 @@ export default function ProjectCreationDialog({
             />
           </div>
 
+          {missing.length > 0 && (
+            <p id="project-missing" className="text-xs text-gray-600" aria-live="polite">
+              To create the project, add {missing.join(', ')}.
+            </p>
+          )}
+
           <DialogFooter>
             <Button
               type="button"
@@ -422,7 +524,7 @@ export default function ProjectCreationDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || !formData.name || !formData.accountId}>
+            <Button type="submit" disabled={loading || missing.length > 0} aria-describedby={missing.length ? 'project-missing' : undefined}>
               {loading ? 'Creating...' : 'Create Project'}
             </Button>
           </DialogFooter>

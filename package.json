@@ -45,6 +45,7 @@
     "e2e:local:registration": "node tests/local-e2e/registration.mjs --reset-local-db",
     "e2e:local:onboarding": "node tests/local-e2e/onboarding-browser.mjs --reset-local-db",
     "e2e:local:invite-browser": "node tests/local-e2e/invite-same-browser.mjs",
+    "e2e:local:project-dialog": "node tests/local-e2e/project-dialog.mjs",
     "local:fresh": "node tests/local-e2e/fresh.mjs",
     "e2e:local:build": "node tests/local-e2e/with-local-env.mjs npm run build",
     "e2e:local:start": "node tests/local-e2e/with-local-env.mjs npm start",
