@@ -40,6 +40,13 @@ const eslintConfig = [
       "@typescript-eslint/no-unused-expressions": "warn",
     },
   },
+  {
+    // Plain Node.js helper scripts (CommonJS, run with `node`): require() is correct here
+    files: ["scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

@@ -557,6 +557,167 @@ export async function run(report) {
   });
   await check('G6-client', 'Client cannot read budgets', async () => { const n = await count(U.client, `select count(*)::int n from public.project_financials`); return { pass: n === 0, info: `${n}` }; });
 
+  // ---- Notifications: workflow steps and project status (trigger-based)
+  {
+    const notes = async (uid, type) => (await q(`select title, message, link from public.notifications where user_id = $1 and type = $2 order by created_at`, [uid, type])).rows;
+    const roleNode = (await q(`insert into public.workflow_nodes (workflow_template_id, node_type, label, entity_id) values ($1,'role','Build',$2) returning id`, [tpl, R.emp])).rows[0].id;
+    const pmNode = (await q(`insert into public.workflow_nodes (workflow_template_id, node_type, label, entity_id) values ($1,'approval','Sign-off',$2) returning id`, [tpl, R.pm])).rows[0].id;
+    const addStep = (nodeId, branch, assignee = null) => q(`insert into public.workflow_active_steps (workflow_instance_id, node_id, branch_id, status, assigned_user_id) values ($1,$2,$3,'active',$4) returning id`, [wi, nodeId, branch, assignee]);
+
+    await addStep(node, 'n1'); // client-approval step
+    await check('WF-notify-client', 'A client-approval step notifies the project\'s client users, not other accounts or staff', async () => {
+      const c = await notes(U.client, 'approval_request'), c2 = await notes(U.client2, 'approval_request'), e = await notes(U.emp, 'approval_request');
+      return { pass: c.length === 1 && c[0].link === '/client-portal/approvals' && c2.length === 0 && e.length === 0, info: `client ${c.length}, other client ${c2.length}, employee ${e.length}` };
+    });
+    const s2 = (await addStep(roleNode, 'n2', U.emp2)).rows[0].id;
+    await check('WF-notify-assignee', 'A step assigned to a person notifies that person only', async () => {
+      const a = await notes(U.emp2, 'workflow_step'), b = await notes(U.emp, 'workflow_step');
+      return { pass: a.length === 1 && b.length === 0 && /Build/.test(a[0].message), info: `assignee ${a.length}, other holder ${b.length}` };
+    });
+    await check('WF-notify-nodup', 'Re-saving the same assignee does not notify twice', async () => {
+      await q(`update public.workflow_active_steps set assigned_user_id = $1 where id = $2`, [U.emp2, s2]);
+      return { pass: (await notes(U.emp2, 'workflow_step')).length === 1 };
+    });
+    await addStep(pmNode, 'n3'); // unassigned approval step: holders of the role
+    await check('WF-notify-role', 'An unassigned approval step notifies the holders of its role, never clients', async () => {
+      const a = await notes(U.pm, 'approval_request'), b = await notes(U.pm2, 'approval_request'), c = await notes(U.client, 'approval_request');
+      return { pass: a.length === 1 && b.length === 1 && c.length === 1 /* only the earlier client step */, info: `pm ${a.length}, pm2 ${b.length}, client total ${c.length}` };
+    });
+    await check('WF-notify-reactivate', 'A step that is completed and re-activated notifies again', async () => {
+      await q(`update public.workflow_active_steps set status = 'completed' where id = $1`, [s2]);
+      await q(`update public.workflow_active_steps set status = 'active', activated_at = now() + interval '1 second' where id = $1`, [s2]);
+      return { pass: (await notes(U.emp2, 'workflow_step')).length === 2 };
+    });
+
+    const pshared = (await q(`insert into public.projects (name, account_id, created_by, shared_with_client, status) values ('Status shared',$1,$2,true,'planning') returning id`, [acct.id, U.pm])).rows[0].id;
+    const pinternal = (await q(`insert into public.projects (name, account_id, created_by, shared_with_client, status) values ('Status internal',$1,$2,false,'planning') returning id`, [acct.id, U.pm])).rows[0].id;
+    await q(`update public.projects set status = 'in_progress' where id in ($1,$2)`, [pshared, pinternal]);
+    await check('PRJ-status-notify', 'A status change on a shared project notifies its client; internal projects and other accounts stay silent', async () => {
+      const c = (await q(`select message from public.notifications where user_id = $1 and type = 'project_status' and project_id = $2`, [U.client, pshared])).rows;
+      const i = (await q(`select 1 from public.notifications where type = 'project_status' and project_id = $1`, [pinternal])).rows;
+      const o = (await q(`select 1 from public.notifications where user_id = $1 and type = 'project_status'`, [U.client2])).rows;
+      return { pass: c.length === 1 && /In Progress/.test(c[0].message) && i.length === 0 && o.length === 0, info: `client ${c.length}, internal ${i.length}, other account ${o.length}` };
+    });
+    await check('PRJ-status-same', 'Saving a project without changing its status sends nothing', async () => {
+      await q(`update public.projects set description = 'x' where id = $1`, [pshared]);
+      return { pass: (await q(`select 1 from public.notifications where type = 'project_status' and project_id = $1`, [pshared])).rows.length === 1 };
+    });
+  }
+
+  // ---- Scheduling: a task cannot start while its dependencies are not done
+  {
+    const mk = async (nm, assignee) => (await q(`insert into public.tasks (name, project_id, created_by, assigned_to, status) values ($1,$2,$3,$4,'todo') returning id`, [nm, P, U.pm, assignee])).rows[0].id;
+    const pre = await mk('Design', U.emp2), post = await mk('Build', U.emp);
+    await q(`insert into public.task_dependencies (task_id, depends_on_task_id) values ($1,$2)`, [post, pre]);
+    const start = (uid, id) => asUser(uid, () => tryQ(`update public.tasks set status = 'in_progress' where id = $1`, [id]));
+    await check('SCH-block', 'An assignee cannot start a task whose dependency is not done (names what it waits for)', async () => {
+      const r = await start(U.emp, post);
+      return { pass: code(r, '23514') && /Waiting for: Design/.test(r.error || r.message || describe(r)), info: describe(r) };
+    });
+    await check('SCH-manager', 'A project manager may start it early', async () => {
+      const r = await start(U.pm, post);
+      await q(`update public.tasks set status = 'todo' where id = $1`, [post]);
+      return { pass: r.ok, info: describe(r) };
+    });
+    await check('SCH-unblock', 'Once the dependency is done the assignee can start', async () => {
+      await q(`update public.tasks set status = 'done' where id = $1`, [pre]);
+      const r = await start(U.emp, post);
+      return { pass: r.ok, info: describe(r) };
+    });
+    await check('SCH-independent', 'Tasks without dependencies start normally', async () => {
+      const free = await mk('Free task', U.emp);
+      const r = await start(U.emp, free);
+      return { pass: r.ok, info: describe(r) };
+    });
+  }
+
+  // ---- Role escalation guard: U.viewer holds the Executive role (has manage_user_roles)
+  {
+    // System roles come from supabase/seed.sql, which this harness does not run
+    await q(`insert into public.roles (id, name, permissions, is_system_role, hierarchy_level) values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Superadmin', '{}', true, 100) on conflict (id) do nothing`);
+    const superRole = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const pdRole = await roleId('Project Director');
+    const assign = (actor, user, role) => asUser(actor, () => tryQ(`insert into public.user_roles (user_id, role_id) values ($1,$2)`, [user, role]));
+    await check('ESC-self-superadmin', 'A role manager cannot give themselves the Superadmin role', async () => {
+      const r = await assign(U.viewer, U.viewer, superRole);
+      return { pass: denied(r), info: describe(r) };
+    });
+    await check('ESC-other-superadmin', 'A role manager cannot give anyone else the Superadmin role', async () => {
+      const r = await assign(U.viewer, U.emp2, superRole);
+      return { pass: denied(r), info: describe(r) };
+    });
+    await check('ESC-self-any', 'Nobody but a superadmin changes their own roles', async () => {
+      const r = await assign(U.viewer, U.viewer, R.emp);
+      return { pass: denied(r), info: describe(r) };
+    });
+    await check('ESC-ceiling', 'A role manager cannot hand out a role with permissions they do not hold (Executive → Project Director)', async () => {
+      const r = await assign(U.viewer, U.emp2, pdRole);
+      return { pass: denied(r), info: describe(r) };
+    });
+    await check('ESC-within', 'A role manager can assign a role within their own permissions (Executive → Employee)', async () => {
+      const helper = (await q(`insert into public.roles (name, permissions, is_system_role, hierarchy_level) values ('Helper (test)', '{"view_projects":true}', false, 10) returning id`)).rows[0].id;
+      const r = await assign(U.viewer, U.emp2, helper);
+      await q(`delete from public.user_roles where role_id = $1`, [helper]);
+      await q(`delete from public.roles where id = $1`, [helper]);
+      return { pass: r.ok, info: describe(r) };
+    });
+    await check('ESC-remove-superadmin', "A role manager cannot remove a superadmin's role", async () => {
+      await q(`insert into public.user_roles (user_id, role_id) values ($1,$2) on conflict do nothing`, [U.admin, superRole]);
+      const r = await asUser(U.viewer, () => tryQ(`delete from public.user_roles where user_id = $1`, [U.admin]));
+      const still = (await q(`select count(*)::int n from public.user_roles where user_id = $1`, [U.admin])).rows[0].n;
+      // Either refused or a no-op (the Executive cannot even see other users' role rows); the row must survive
+      return { pass: still === 1, info: `${describe(r)}; superadmin role rows left: ${still}` };
+    });
+    await check('ESC-superadmin-ok', 'A superadmin can still assign any role', async () => {
+      const r = await assign(U.admin, U.emp2, pdRole);
+      await q(`delete from public.user_roles where user_id = $1 and role_id = $2`, [U.emp2, pdRole]);
+      return { pass: r.ok, info: describe(r) };
+    });
+
+    // A department admin (manage_departments) editing role definitions
+    const deptAdminRole = (await q(`insert into public.roles (name, permissions, is_system_role, hierarchy_level) values ('Dept Admin (test)', '{"manage_departments":true,"view_projects":true}', false, 40) returning id`)).rows[0].id;
+    await q(`insert into public.user_roles (user_id, role_id) values ($1,$2)`, [U.outsider, deptAdminRole]);
+    const asDept = (sql, params) => asUser(U.outsider, () => tryQ(sql, params));
+    await check('ESC-role-self-widen', 'A department admin cannot add a permission they lack to their own role', async () => {
+      const r = await asDept(`update public.roles set permissions = permissions || '{"manage_all_projects":true}' where id = $1`, [deptAdminRole]);
+      const has = (await q(`select permissions ? 'manage_all_projects' as x from public.roles where id = $1`, [deptAdminRole])).rows[0].x;
+      return { pass: !r.ok && !has, info: describe(r) };
+    });
+    await check('ESC-role-system', 'A department admin cannot edit a system role', async () => {
+      const r = await asDept(`update public.roles set description = 'x' where id = $1`, [superRole]);
+      return { pass: !r.ok, info: describe(r) };
+    });
+    await check('ESC-role-create-ceiling', 'A department admin can create roles only with permissions they hold', async () => {
+      const a = await asDept(`insert into public.roles (name, permissions, is_system_role, hierarchy_level) values ('Viewer (test)', '{"view_projects":true}', false, 10) returning id`);
+      const b = await asDept(`insert into public.roles (name, permissions, is_system_role, hierarchy_level) values ('Boss (test)', '{"manage_projects":true}', false, 10)`);
+      const c = await asDept(`insert into public.roles (name, permissions, is_system_role, hierarchy_level) values ('Fake super (test)', '{}', true, 100)`);
+      if (a.ok) await q(`delete from public.roles where id = $1`, [a.rows[0].id]);
+      return { pass: a.ok && !b.ok && !c.ok, info: `within: ${describe(a)}; beyond: ${describe(b)}; system: ${describe(c)}` };
+    });
+    await q(`delete from public.user_roles where user_id = $1 and role_id = $2`, [U.outsider, deptAdminRole]);
+    await q(`delete from public.roles where id = $1`, [deptAdminRole]);
+  }
+
+  // ---- SEC-12: audit log is server-written, superadmin-readable, append-only
+  {
+    await asService(() => tryQ(`insert into public.audit_log (actor_id, action, entity_type, entity_id, project_id, details) values ($1,'override_access','project',$2,$2,'{"level":"manage"}')`, [U.admin, P]));
+    const readable = async (uid) => count(uid, `select count(*)::int n from public.audit_log`);
+    await check('SEC12-read', 'Only a superadmin can read the audit log', async () => {
+      const a = await readable(U.admin), e = await readable(U.emp), p = await readable(U.pm), c = await readable(U.client);
+      return { pass: a >= 1 && e === 0 && p === 0 && c === 0, info: `superadmin ${a}, employee ${e}, manager ${p}, client ${c}` };
+    });
+    await check('SEC12-write', 'Signed-in users cannot write to the audit log, not even superadmins', async () => {
+      const mk = (uid) => asUser(uid, () => tryQ(`insert into public.audit_log (actor_id, action, entity_type) values ($1,'x','x')`, [uid]));
+      const [a, b] = [await mk(U.emp), await mk(U.admin)];
+      return { pass: !a.ok && !b.ok, info: `employee: ${describe(a)}; superadmin: ${describe(b)}` };
+    });
+    await check('SEC12-append-only', 'Audit rows cannot be changed or deleted, even by the server', async () => {
+      const u = await asService(() => tryQ(`update public.audit_log set action = 'tampered'`));
+      const d = await asService(() => tryQ(`delete from public.audit_log`));
+      return { pass: !u.ok && !d.ok && (await q(`select count(*)::int n from public.audit_log where action = 'tampered'`)).rows[0].n === 0, info: `update: ${describe(u)}; delete: ${describe(d)}` };
+    });
+  }
+
   // ---- D-1 project completes when its workflow completes
   const wi4 = (await q(`insert into public.workflow_instances (workflow_template_id, project_id, current_node_id, status) values ($1,$2,$3,'active') returning id`, [tpl, P4, node])).rows[0].id;
   await check('D1-direct-blocked', 'An employee cannot update the project row directly (why the old code failed silently)', async () => {

@@ -88,6 +88,10 @@ export async function POST(
       .eq('user_id', userId);
 
     if (currentRolesError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((currentRolesError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (currentRolesError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error fetching current roles', {}, currentRolesError as unknown as Error);
       return NextResponse.json({ error: 'Failed to check current roles' }, { status: 500 });
     }
@@ -124,6 +128,10 @@ export async function POST(
         .eq('role_id', noAssignedRole.role_id);
 
       if (deleteError) {
+        // Role-escalation guard and other permission refusals from the database: show the reason
+        if ((deleteError as { code?: string }).code === '42501') {
+          return NextResponse.json({ error: (deleteError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+        }
         logger.error('Error removing user from "No Assigned Role"', {}, deleteError as unknown as Error);
         return NextResponse.json({ error: 'Failed to remove user from "No Assigned Role"' }, { status: 500 });
       }
@@ -144,6 +152,10 @@ export async function POST(
       });
 
     if (insertError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((insertError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (insertError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error assigning user to role', {}, insertError as unknown as Error);
       return NextResponse.json({ error: 'Failed to assign user to role' }, { status: 500 });
     }
@@ -159,6 +171,10 @@ export async function POST(
         .eq('role_id', noAssignedRole.role_id);
 
       if (deleteError) {
+        // Role-escalation guard and other permission refusals from the database: show the reason
+        if ((deleteError as { code?: string }).code === '42501') {
+          return NextResponse.json({ error: (deleteError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+        }
         logger.error('Error removing user from "No Assigned Role" after assignment', {}, deleteError as unknown as Error);
         // Don't fail the request - user is already assigned to new role
         logger.warn('User assigned to new role but failed to remove from "No Assigned Role"', {});

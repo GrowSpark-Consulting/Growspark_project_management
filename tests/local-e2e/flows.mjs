@@ -602,6 +602,56 @@ async function main() {
 
   // ------------------------------------------------------------------ admin
   report.start('Admin: settings, invitations, deactivation');
+  report.start('Invitations: projects, tokens, revoke, expiry');
+  await step('INV-flow', async () => {
+    const { data: empRole } = await admin.from('roles').select('id').eq('name', 'Employee').single();
+    const invite = (who, tag, extra = {}) => api(who, 'POST', '/api/invitations', { email: `inv.${tag}.${RUN}@example.com`, name: `Invitee ${tag}`, roleId: empRole.id, send_email: false, ...extra });
+    report.status('INV-other-pm-project', await invite('pm', 'x1', { projectIds: [IDS.portal] }), 403, "a manager can't add people to another manager's project");
+    report.status('INV-missing-project', await invite('pm', 'x2', { projectIds: ['0e2e0000-0000-4000-8000-0000000fffff'] }), 400);
+    const r = await invite('pm', 'proj', { projectIds: [IDS.website, IDS.internal], phone: '+91 90000 00001' });
+    report.status('INV-with-projects', r, 201, 'invited with two projects');
+    const token = r.body?.invitation?.token;
+    const { data: row } = await admin.from('user_invitations').select('project_ids, phone').eq('token', token).single();
+    report.record('INV-stored', row.project_ids.length === 2 && row.phone === '+91 90000 00001', `projects=${row.project_ids.length}, phone=${row.phone}`);
+    report.status('INV-weak-password', await call(env, null, 'POST', `/api/invitations/accept/${token}`, { password: 'password' }), 400, 'accept enforces the password rule');
+    report.status('INV-accept', await call(env, null, 'POST', `/api/invitations/accept/${token}`, { password: 'Welcome123!' }), [200, 201]);
+    const s = await signIn(env, `inv.proj.${RUN}@example.com`, 'Welcome123!');
+    const { data: teams } = await admin.from('project_assignments').select('project_id').eq('user_id', s.userId).is('removed_at', null);
+    report.record('INV-joined-projects', [IDS.website, IDS.internal].every((p) => (teams || []).some((t) => t.project_id === p)), `member of ${(teams || []).length} project(s)`);
+    report.status('INV-new-user-sees-project', await call(env, s, 'GET', `/api/projects/${IDS.website}`), 200);
+    report.status('INV-reuse', await call(env, null, 'POST', `/api/invitations/accept/${token}`, { password: 'Welcome123!' }), 410, 'accepted invitation cannot be reused');
+
+    report.status('INV-employee-cannot', await invite('emp1', 'byemp'), 403, 'employees cannot invite people');
+    const rv = await invite('pm', 'revoke');
+    report.status('INV-other-manager-revoke', await api('pm2', 'DELETE', `/api/invitations/${rv.body?.invitation?.id}`), 403, "a manager can't revoke another manager's invitation");
+    const pmList = await api('pm', 'GET', '/api/invitations');
+    report.record('INV-own-list', pmList.status === 200 && (pmList.body?.invitations || []).length > 0 && (pmList.body?.invitations || []).every((i) => i.invited_by === ids.pm), `pm sees ${(pmList.body?.invitations || []).length} invitation(s), all their own`);
+    report.status('INV-revoke',await api('pm', 'DELETE', `/api/invitations/${rv.body?.invitation?.id}`), 200);
+    const { data: revoked } = await admin.from('user_invitations').select('status, revoked_at, revoked_by').eq('id', rv.body?.invitation?.id).single();
+    report.record('INV-revoke-recorded', revoked.status === 'revoked' && !!revoked.revoked_at && revoked.revoked_by === ids.pm, `status=${revoked.status}, by pm=${revoked.revoked_by === ids.pm}`);
+    report.status('INV-revoked-accept', await call(env, null, 'POST', `/api/invitations/accept/${rv.body?.invitation?.token}`, { password: 'Welcome123!' }), 410);
+
+    const ex = await invite('pm', 'expired');
+    await admin.from('user_invitations').update({ expires_at: new Date(Date.now() - 60000).toISOString() }).eq('id', ex.body?.invitation?.id);
+    report.status('INV-expired-accept', await call(env, null, 'POST', `/api/invitations/accept/${ex.body?.invitation?.token}`, { password: 'Welcome123!' }), 410);
+    report.status('INV-bad-token', await call(env, null, 'POST', `/api/invitations/accept/${'0'.repeat(64)}`, { password: 'Welcome123!' }), 404);
+  });
+
+  report.start('Security: role escalation');
+  await step('ESC-flow', async () => {
+    const { data: roles } = await admin.from('roles').select('id, name');
+    const rid = (n) => roles.find((r) => r.name === n)?.id;
+    const inv = (who, role, tag) => api(who, 'POST', '/api/invitations', { email: `esc.${tag}.${RUN}@example.com`, name: 'Esc Test', roleId: rid(role), send_email: false });
+    report.status('ESC-invite-superadmin', await inv('executive', 'Superadmin', 'sa'), 403, 'Executive cannot invite a Superadmin');
+    report.status('ESC-invite-ceiling', await inv('executive', 'Project Director', 'pd'), 403, 'Executive cannot invite a role with permissions they lack');
+    report.status('ESC-invite-within', await inv('executive', 'Employee', 'emp'), 201, 'Executive can invite an Employee');
+    report.status('ESC-api-self-superadmin', await api('executive', 'POST', `/api/roles/${rid('Superadmin')}/assign-user`, { userId: ids.executive }), [403], 'role API refuses self-grant of Superadmin');
+    const { error } = await S.executive.db.from('user_roles').insert({ user_id: ids.executive, role_id: rid('Superadmin') });
+    const { data: still } = await admin.from('user_roles').select('role_id').eq('user_id', ids.executive);
+    report.record('ESC-db-self-superadmin', !!error && !(still || []).some((r) => r.role_id === rid('Superadmin')), `direct insert error=${error?.code || 'none'}`);
+    report.status('ESC-superadmin-invite-pd', await inv('superadmin', 'Project Director', 'sapd'), 201, 'superadmin can invite any role');
+  });
+
   report.status('ADM-client-feedback-admin', await api('superadmin', 'GET', `/api/accounts/${IDS.acme}/client-feedback`), 200, 'superadmin opens any account\'s client feedback');
   report.status('ADM-client-invites-admin', await api('superadmin', 'GET', `/api/accounts/${IDS.globex}/client-invites`), 200, 'superadmin lists any account\'s client invitations');
   report.status('ADM-client-feedback-otherpm', await api('pm2', 'GET', `/api/accounts/${IDS.acme}/client-feedback`), [403], 'manager of another account cannot');
@@ -639,6 +689,26 @@ async function main() {
     report.record('ADM-deactivated-signin', s instanceof Error, s instanceof Error ? 'sign-in refused' : 'sign-in still works');
   });
   report.status('ADM-reactivate', await api('superadmin', 'POST', `/api/users/${ids.outsider}/status`, { active: true }), 200);
+  await step('SUS-flow', async () => {
+    const tomorrow = new Date(Date.now() + 2 * 86400000).toISOString();
+    report.status('SUS-no-reason', await api('superadmin', 'POST', `/api/users/${ids.outsider}/status`, { action: 'suspend' }), 400);
+    report.status('SUS-past-date', await api('superadmin', 'POST', `/api/users/${ids.outsider}/status`, { action: 'suspend', reason: 'x', until: '2020-01-01T00:00:00Z' }), 400);
+    const fresh = await signIn(env, PERSONAS.outsider.email);
+    report.status('SUS-suspend', await api('superadmin', 'POST', `/api/users/${ids.outsider}/status`, { action: 'suspend', reason: 'On leave', until: tomorrow }), 200);
+    const blocked = await call(env, fresh, 'GET', '/api/me/summary');
+    report.record('SUS-blocked', blocked.status === 403 && /suspended until/i.test(blocked.body?.error || '') && /On leave/.test(blocked.body?.error || ''), `${blocked.status}: ${blocked.body?.error}`);
+    const s2 = await signIn(env, PERSONAS.outsider.email).catch((e) => e);
+    report.record('SUS-signin-refused', s2 instanceof Error, s2 instanceof Error ? 'sign-in refused' : 'sign-in still works');
+    const self = await fresh.db.from('user_profiles').update({ suspended_until: null, suspension_reason: null, is_active: true }).eq('id', ids.outsider);
+    const { data: still } = await admin.from('user_profiles').select('is_active').eq('id', ids.outsider).single();
+    report.record('SUS-cannot-self-lift', still.is_active === false, `direct update error=${self.error?.code || 'none'}`);
+    // Simulate the end date passing: the next request lifts the suspension
+    await admin.from('user_profiles').update({ suspended_until: new Date(Date.now() - 60000).toISOString() }).eq('id', ids.outsider);
+    await admin.auth.admin.updateUserById(ids.outsider, { ban_duration: 'none' });
+    const back = await call(env, fresh, 'GET', '/api/me/summary');
+    const { data: lifted } = await admin.from('user_profiles').select('is_active, suspended_until').eq('id', ids.outsider).single();
+    report.record('SUS-auto-lift', back.status === 200 && lifted.is_active === true && !lifted.suspended_until, `after the end date: ${back.status}, active=${lifted.is_active}`);
+  });
   report.status('ADM-self-deactivate', await api('emp1', 'POST', `/api/users/${ids.emp1}/status`, { active: false }), [403, 400]);
 
   // ------------------------------------------------------------------ cron

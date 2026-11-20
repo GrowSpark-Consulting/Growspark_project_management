@@ -12,13 +12,6 @@ export const name = 'Schema drift (code vs. migrations)';
 // Pre-existing references to things that do not exist. Each one is listed in
 // IMPLEMENTATION_CHECKLIST.md. Remove an entry when it is fixed.
 const KNOWN_PRE_EXISTING = {
-  'user_profiles.is_approved': 'D-4 signup-approval service (lib/user-approval-service.ts)',
-  'user_profiles.approved_at': 'D-4 signup-approval service',
-  'user_profiles.approved_by': 'D-4 signup-approval service',
-  'user_profiles.approval_requested_at': 'D-4 signup-approval service',
-  'pending_user_approvals': 'D-4 signup-approval service',
-  'form_templates.fields': 'D-5 legacy form service (lib/form-service.ts); live table uses "schema"',
-  'form_templates.is_active': 'D-5 legacy form service',
   'project_contributors': 'Optional table, handled gracefully (app/projects/[projectId]/page.tsx)',
   'project_issues.updated_at': 'Unused helper updateIssueContent (lib/project-issues-service.ts)',
   'account_kanban_configs.count': 'Not a column: count option parsed as one by this checker',

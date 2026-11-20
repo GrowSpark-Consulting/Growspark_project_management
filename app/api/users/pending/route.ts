@@ -1,46 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createApiSupabaseClient } from '@/lib/supabase-server';
-import { userApprovalService } from '@/lib/user-approval-service';
-import { requireAuthAndPermission, handleGuardError } from '@/lib/server-guards';
-import { Permission } from '@/lib/permissions';
-import { logger, apiCall, apiResponse } from '@/lib/debug-logger';
+import { NextResponse } from 'next/server'
+import { api, HttpError } from '@/lib/api/context'
+import { listPendingUsers } from '@/lib/user-approval-server'
 
-export async function GET(request: NextRequest) {
-  const startTime = Date.now();
-  
-  try {
-    // Check authentication and permission (approving users is part of user role management)
-    await requireAuthAndPermission(Permission.MANAGE_USER_ROLES, {}, request);
-    
-    const supabase = createApiSupabaseClient(request);
-    if (!supabase) {
-      logger.error('Supabase not configured', { action: 'getPendingUsers' });
-      return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
-    }
-
-    apiCall('GET', '/api/users/pending', { action: 'getPendingUsers' });
-
-    const pendingUsers = await userApprovalService.getPendingUsers();
-
-    const duration = Date.now() - startTime;
-    apiResponse('GET', '/api/users/pending', 200, { 
-      action: 'getPendingUsers',
-      duration,
-      count: pendingUsers.length
-    });
-
-    logger.info('Pending users retrieved', { 
-      action: 'getPendingUsers',
-      count: pendingUsers.length,
-      duration
-    });
-
-    return NextResponse.json({ 
-      users: pendingUsers,
-      count: pendingUsers.length
-    });
-
-  } catch (error: unknown) {
-    return handleGuardError(error);
-  }
-}
+// GET /api/users/pending - people who signed up and are waiting for a role
+export const GET = api(async (_request, ctx) => {
+  if (!ctx.has('manage_user_roles')) throw new HttpError(403, 'You cannot approve users')
+  const users = await listPendingUsers(ctx.admin)
+  return NextResponse.json({ users, count: users.length })
+})

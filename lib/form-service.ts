@@ -129,7 +129,8 @@ export async function createFormTemplate(
     .insert({
       name,
       description,
-      fields,
+      // The definition is stored in "schema"; "fields" is a read-only column derived from it
+      schema: fields,
       created_by: createdBy,
       is_active: true,
     })
@@ -166,7 +167,10 @@ export async function updateFormTemplate(
 
   const { data, error } = await supabase
     .from('form_templates')
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update({
+      ...(({ fields, ...rest }) => ({ ...rest, ...(fields ? { schema: fields } : {}) }))(updates),
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', templateId)
     .select()
     .single();

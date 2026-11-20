@@ -17,9 +17,11 @@ export const POST = api<{ id: string }>(async (request, ctx, params) => {
   if (body.decision === 'rejected' && !body.feedback?.trim()) throw new HttpError(400, 'Please tell the team what needs to change')
 
   const now = new Date().toISOString()
+  // Conditional update: of two simultaneous decisions only one matches status = client_review (SEC-16)
   const updated = check(await ctx.admin.from('deliverables').update({
     status: body.decision, approved_by: ctx.userId, approved_at: now, feedback: body.feedback || null, updated_at: now,
-  }).eq('id', d.id).eq('status', 'client_review').select('*').single())
+  }).eq('id', d.id).eq('status', 'client_review').select('*').maybeSingle())
+  if (!updated) throw new HttpError(409, 'This deliverable has already been decided')
 
   // History entry visible to the client and the team
   await ctx.admin.from('project_updates').insert({

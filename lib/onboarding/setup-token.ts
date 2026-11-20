@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from '@/lib/supabase-server';
+import { getRegistrationState } from '@/lib/registration-state';
 import crypto from 'crypto';
 
 // Generate a cryptographically secure setup token
@@ -7,20 +8,21 @@ export function generateToken(): string {
 }
 
 // Check if this is a first run (no user_profiles exist)
+// Same rule as company registration (lib/registration-state.ts). Fails CLOSED: if the
+// database can't be read this is not treated as a first run (that used to send visitors
+// to /signup, which then said "already set up").
 export async function isFirstRun(): Promise<boolean> {
   const supabase = createAdminSupabaseClient();
   if (!supabase) {
     console.error('isFirstRun: SUPABASE_SERVICE_ROLE_KEY not configured. Cannot check first-run status.');
-    // Fallback: assume first run if admin client unavailable
-    // This ensures the onboarding wizard shows even if the env var is missing
-    return true;
+    return false;
   }
-  const { count, error } = await supabase.from('user_profiles').select('*', { count: 'exact', head: true });
-  if (error) {
-    console.error('isFirstRun: Failed to query user_profiles:', error.message);
-    return true; // Assume first run on error — better to show onboarding than login
+  try {
+    return (await getRegistrationState(supabase)).open;
+  } catch (error) {
+    console.error('isFirstRun: could not read the installation state:', (error as Error).message);
+    return false;
   }
-  return (count ?? 0) === 0;
 }
 
 // Create a new setup token (15 minute expiry)

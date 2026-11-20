@@ -79,6 +79,10 @@ export async function POST(
       .eq('role_id', roleId);
 
     if (deleteError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((deleteError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (deleteError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error removing user from role', {}, deleteError as unknown as Error);
       return NextResponse.json({ error: 'Failed to remove user from role' }, { status: 500 });
     }
@@ -108,6 +112,10 @@ export async function POST(
       });
 
     if (assignError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((assignError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (assignError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error assigning user to fallback role', {}, assignError as unknown as Error);
       return NextResponse.json({ 
         error: 'User removed from role but failed to assign to fallback role' 

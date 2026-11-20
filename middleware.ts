@@ -28,6 +28,8 @@ const publicRoutes = [
   '/reset-password',
   '/forgot-password',
   '/auth/callback',
+  '/terms',
+  '/privacy',
 ];
 
 /**

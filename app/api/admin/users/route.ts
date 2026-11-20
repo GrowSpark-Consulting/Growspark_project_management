@@ -8,7 +8,7 @@ export const GET = api(async (request, ctx) => {
   }
   const type = new URL(request.url).searchParams.get('type') || 'all'
   let query = ctx.admin.from('user_profiles')
-    .select('id, name, email, phone, is_active, is_client, is_superadmin, client_account_id, deactivated_at, created_at')
+    .select('id, name, email, phone, is_active, is_client, is_superadmin, client_account_id, deactivated_at, suspended_until, suspension_reason, created_at')
     .order('name')
   if (type === 'internal') query = query.eq('is_client', false)
   if (type === 'client') query = query.eq('is_client', true)

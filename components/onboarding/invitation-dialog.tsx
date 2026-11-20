@@ -27,6 +27,12 @@ interface Role {
   id: string;
   name: string;
   department_id: string | null;
+  is_system_role?: boolean;
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
 }
 
 interface Department {
@@ -45,6 +51,8 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
   const [email, setEmail] = useState('');
   const [roleId, setRoleId] = useState('');
   const [departmentId, setDepartmentId] = useState('');
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [phone, setPhone] = useState('');
   const [sendEmail, setSendEmail] = useState(true);
   const [result, setResult] = useState<{ acceptUrl: string; whatsappUrl?: string; emailSent?: boolean; email: string } | null>(null);
@@ -62,16 +70,21 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
     async function fetchData() {
       setLoadingData(true);
       try {
-        const [rolesRes, deptsRes] = await Promise.all([
+        const [rolesRes, deptsRes, projectsRes] = await Promise.all([
           fetch('/api/roles', { credentials: 'include' }),
           fetch('/api/departments', { credentials: 'include' }),
+          fetch('/api/projects?limit=200', { credentials: 'include' }),
         ]);
+        if (projectsRes.ok) {
+          const pd = await projectsRes.json();
+          setProjects(((pd.projects || pd.data || []) as ProjectOption[]).map((p) => ({ id: p.id, name: p.name })));
+        }
 
         if (rolesRes.ok) {
           const rolesData = await rolesRes.json();
           // Handle both array and { roles: [] } response shapes
           const rolesList = Array.isArray(rolesData) ? rolesData : (rolesData.roles || []);
-          setRoles(rolesList.filter((r: Role) => !r.name?.toLowerCase().includes('superadmin')));
+          setRoles(rolesList.filter((r: Role) => !r.is_system_role && !r.name?.toLowerCase().includes('superadmin')));
         }
 
         if (deptsRes.ok) {
@@ -96,6 +109,7 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
       setEmail('');
       setRoleId('');
       setDepartmentId('');
+      setProjectIds([]);
       setPhone('');
       setSendEmail(true);
       setResult(null);
@@ -138,6 +152,7 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
           email: email.trim(),
           roleId,
           departmentId: departmentId || undefined,
+          projectIds: projectIds.length ? projectIds : undefined,
           send_email: sendEmail,
           phone: phone.trim() || undefined,
         }),
@@ -269,6 +284,26 @@ export function InvitationDialog({ open, onOpenChange, onInvited }: InvitationDi
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Projects (optional): the employee joins these teams when they accept */}
+            {projects.length > 0 && (
+              <div className="space-y-2">
+                <Label>Projects <span className="text-gray-400 font-normal">(optional)</span></Label>
+                <div className="max-h-36 overflow-y-auto rounded-md border border-line p-2 space-y-1">
+                  {projects.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={projectIds.includes(p.id)}
+                        onChange={(e) => setProjectIds((ids) => e.target.checked ? [...ids, p.id] : ids.filter((x) => x !== p.id))}
+                      />
+                      <span className="truncate">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-ink-muted">They are added to these project teams when they accept the invitation.</p>
+              </div>
+            )}
 
             {/* WhatsApp number (optional) */}
             <div className="space-y-2">

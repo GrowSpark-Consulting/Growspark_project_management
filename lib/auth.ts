@@ -459,6 +459,7 @@ export async function updateUserProfile(profileData: {
   name?: string;
   bio?: string;
   skills?: string[];
+  phone?: string | null;
 }) {
   try {
     const user = await getCurrentUser();

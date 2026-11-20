@@ -82,6 +82,10 @@ export async function DELETE(
       .eq('role_id', roleId);
 
     if (userRolesError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((userRolesError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (userRolesError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error checking user roles', { 
         action: 'deleteRole',
         roleId,
@@ -100,6 +104,10 @@ export async function DELETE(
       .eq('entity_id', roleId);
 
     if (workflowNodesError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((workflowNodesError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (workflowNodesError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error checking workflow nodes', {
         action: 'deleteRole',
         roleId,
@@ -124,6 +132,10 @@ export async function DELETE(
         .eq('entity_id', roleId);
 
       if (clearEntityError) {
+        // Role-escalation guard and other permission refusals from the database: show the reason
+        if ((clearEntityError as { code?: string }).code === '42501') {
+          return NextResponse.json({ error: (clearEntityError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+        }
         logger.error('Error clearing entity_id on workflow nodes', {
           action: 'deleteRole',
           roleId,
@@ -175,6 +187,10 @@ export async function DELETE(
           .neq('role_id', roleId); // Exclude the role being deleted
 
         if (otherRolesError) {
+          // Role-escalation guard and other permission refusals from the database: show the reason
+          if ((otherRolesError as { code?: string }).code === '42501') {
+            return NextResponse.json({ error: (otherRolesError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+          }
           logger.error('Error checking other roles for user', { 
             action: 'deleteRole',
             userId: userRole.user_id,
@@ -192,6 +208,10 @@ export async function DELETE(
             .eq('role_id', roleId);
 
           if (reassignError) {
+            // Role-escalation guard and other permission refusals from the database: show the reason
+            if ((reassignError as { code?: string }).code === '42501') {
+              return NextResponse.json({ error: (reassignError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+            }
             logger.error('Error reassigning user to fallback role', { 
               action: 'deleteRole',
               userId: userRole.user_id,
@@ -213,6 +233,10 @@ export async function DELETE(
             .eq('role_id', roleId);
 
           if (deleteError) {
+            // Role-escalation guard and other permission refusals from the database: show the reason
+            if ((deleteError as { code?: string }).code === '42501') {
+              return NextResponse.json({ error: (deleteError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+            }
             logger.error('Error removing user from deleted role', { 
               action: 'deleteRole',
               userId: userRole.user_id,
@@ -252,6 +276,10 @@ export async function DELETE(
       .select();
 
     if (deleteError) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((deleteError as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (deleteError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error deleting role', { 
         action: 'deleteRole',
         roleId,

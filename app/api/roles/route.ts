@@ -71,6 +71,10 @@ export async function GET(request: NextRequest) {
       .order('display_order', { ascending: true });
 
     if (error) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((error as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (error as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       logger.error('Error fetching roles', {
         action: 'getRoles',
         code: error.code,
@@ -281,6 +285,10 @@ export async function POST(request: NextRequest) {
         .single();
       
       if (reportingError) {
+        // Role-escalation guard and other permission refusals from the database: show the reason
+        if ((reportingError as { code?: string }).code === '42501') {
+          return NextResponse.json({ error: (reportingError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+        }
         logger.error('Error fetching reporting role', { 
           action: 'createRole',
           reporting_role_id,
@@ -334,6 +342,10 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
+      // Role-escalation guard and other permission refusals from the database: show the reason
+      if ((error as { code?: string }).code === '42501') {
+        return NextResponse.json({ error: (error as { message?: string }).message || 'Permission denied' }, { status: 403 });
+      }
       databaseError('INSERT', 'roles', error, { action: 'createRole', name });
       logger.error('Error creating role', { 
         action: 'createRole',
@@ -390,6 +402,10 @@ export async function POST(request: NextRequest) {
           .eq('id', role.id);
         
         if (correctionError) {
+          // Role-escalation guard and other permission refusals from the database: show the reason
+          if ((correctionError as { code?: string }).code === '42501') {
+            return NextResponse.json({ error: (correctionError as { message?: string }).message || 'Permission denied' }, { status: 403 });
+          }
           logger.error('Error correcting created role hierarchy level', {}, correctionError as unknown as Error);
         } else {
           logger.debug('Created role hierarchy level corrected successfully');

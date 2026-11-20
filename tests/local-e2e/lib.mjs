@@ -2,6 +2,7 @@
 // Safety: every script refuses to run unless Supabase is on localhost / 127.0.0.1.
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
@@ -35,6 +36,53 @@ export function loadEnv() {
 
 export function adminClient(env) {
   return createClient(env.url, env.service, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
+/** Playwright's Chromium headless shell (or CHROME_PATH). */
+export function chromePath() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const base = path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
+  if (!fs.existsSync(base)) return undefined;
+  for (const d of fs.readdirSync(base).filter((x) => x.startsWith('chromium_headless_shell-')).sort().reverse()) {
+    const exe = path.join(base, d, 'chrome-headless-shell-win64', 'chrome-headless-shell.exe');
+    if (fs.existsSync(exe)) return exe;
+  }
+  return undefined;
+}
+
+/** Test accounts all use @example.com. Anything else is someone's own local account. */
+export const isTestEmail = (email) => /@example\.com$/i.test(email || '');
+
+/**
+ * Wipe and rebuild the LOCAL database (`supabase db reset --local`: every migration + seed.sql).
+ * Refuses when the database holds accounts that aren't test accounts (for example a workspace you
+ * registered yourself in the browser) unless the command line has --wipe-local-accounts.
+ */
+export async function resetLocalDb(env, { log = console.log } = {}) {
+  const admin = adminClient(env);
+  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  if (error) throw new Error(`Could not list local accounts before the reset: ${error.message}`);
+  const own = (data?.users || []).filter((u) => !isTestEmail(u.email));
+  if (own.length && !process.argv.includes('--wipe-local-accounts')) {
+    throw new Error(`Refusing to reset: the local database has ${own.length} non-test account(s) (${own.map((u) => u.email).join(', ')}). `
+      + 'They would be deleted. Re-run with --wipe-local-accounts if that is really what you want.');
+  }
+  const { data: s } = await admin.from('app_settings').select('workspace_name, registered_by').eq('id', true).maybeSingle();
+  if (s?.registered_by && !process.argv.includes('--wipe-local-accounts')) {
+    const { data: owner } = await admin.auth.admin.getUserById(s.registered_by);
+    if (owner?.user && !isTestEmail(owner.user.email)) {
+      throw new Error(`Refusing to reset: workspace "${s.workspace_name}" was registered by ${owner.user.email}. Re-run with --wipe-local-accounts to delete it.`);
+    }
+  }
+  log('Resetting the LOCAL database (supabase db reset --local)…');
+  execSync('npx supabase db reset --local', { cwd: ROOT, stdio: 'ignore' });
+  // The API gateway needs a moment after the reset
+  for (let i = 0; i < 30; i++) {
+    const { error: e } = await adminClient(env).from('app_settings').select('id').limit(1);
+    if (!e) return;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error('The local database did not come back after the reset');
 }
 
 /** Sign in like the browser does and return the auth cookie header plus a user-scoped client. */

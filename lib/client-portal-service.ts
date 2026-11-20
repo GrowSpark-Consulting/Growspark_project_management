@@ -661,6 +661,26 @@ export const getClientFeedbackByAccount = getAccountFeedback;
 /**
  * Client approves project at workflow approval node
  */
+/**
+ * Claim the workflow step: the update only matches while the instance is still active and still on
+ * the step the client looked at, so of two simultaneous decisions exactly one succeeds (SEC-16).
+ * The loser gets "already decided" and writes nothing.
+ */
+async function claimWorkflowStep(supabase: any, workflowInstanceId: string, currentNodeId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from("workflow_instances")
+    .update(values)
+    .eq("id", workflowInstanceId)
+    .eq("status", "active")
+    .eq("current_node_id", currentNodeId)
+    .select("id");
+  if (error) {
+    logger.error("Error updating workflow instance", { workflowInstanceId }, error);
+    throw new Error("Failed to advance workflow");
+  }
+  if (!data || data.length === 0) throw new Error("This step has already been decided");
+}
+
 export async function clientApproveProject(params: {
   projectId: string;
   workflowInstanceId: string;
@@ -722,13 +742,10 @@ export async function clientApproveProject(params: {
 
   if (!connections || connections.length === 0) {
     // No next nodes - complete the workflow
-    await supabase
-      .from('workflow_instances')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', workflowInstanceId);
+    await claimWorkflowStep(supabase, workflowInstanceId, instance.current_node_id, {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    });
 
     logger.info('Client approved project - workflow completed', { projectId, workflowInstanceId, clientUserId });
 
@@ -770,24 +787,13 @@ export async function clientApproveProject(params: {
 
   // Update workflow instance — move to next node (or complete if End node)
   if (isEndNode) {
-    await supabase
-      .from('workflow_instances')
-      .update({
-        current_node_id: nextNodeId,
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', workflowInstanceId);
+    await claimWorkflowStep(supabase, workflowInstanceId, instance.current_node_id, {
+      current_node_id: nextNodeId,
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    });
   } else {
-    const { error: updateError } = await supabase
-      .from('workflow_instances')
-      .update({ current_node_id: nextNodeId })
-      .eq('id', workflowInstanceId);
-
-    if (updateError) {
-      logger.error('Error updating workflow instance', { action: 'clientApproveProject', workflowInstanceId }, updateError);
-      throw new Error('Failed to advance workflow');
-    }
+    await claimWorkflowStep(supabase, workflowInstanceId, instance.current_node_id, { current_node_id: nextNodeId });
   }
 
   // Update workflow_active_steps: mark current as completed, next as active
@@ -924,10 +930,7 @@ export async function clientRejectProject(params: {
 
   // 5. Update workflow instance and active steps to the rejection target node
   if (rejectionTargetNodeId !== instance.current_node_id) {
-    await supabase
-      .from('workflow_instances')
-      .update({ current_node_id: rejectionTargetNodeId })
-      .eq('id', workflowInstanceId);
+    await claimWorkflowStep(supabase, workflowInstanceId, instance.current_node_id, { current_node_id: rejectionTargetNodeId });
 
     // Update workflow_active_steps: mark current as completed, target as active
     await supabase

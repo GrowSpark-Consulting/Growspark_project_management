@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { passwordMessage } from '@/lib/registration-rules';
+import { roleGrantRefusal } from '@/lib/role-guard';
 import { createAdminSupabaseClient } from '@/lib/supabase-server';
 import { sendEmail } from '@/lib/email/mailer';
 import { welcomeEmailTemplate } from '@/lib/email/templates/welcome';
@@ -95,9 +97,11 @@ export async function POST(
     const { password } = body;
 
     // Validate password
-    if (!password || typeof password !== 'string' || password.length < 8) {
+    // Same password rule as registration and Supabase Auth (8+ characters with a letter and a number)
+    const passwordError = typeof password === 'string' ? passwordMessage(password) : 'Password is required';
+    if (passwordError) {
       return NextResponse.json(
-        { error: 'Password must be at least 8 characters long' },
+        { error: passwordError },
         { status: 400 }
       );
     }
@@ -138,6 +142,16 @@ export async function POST(
         .eq('id', invitation.id);
 
       return NextResponse.json({ error: 'This invitation has expired' }, { status: 410 });
+    }
+
+    // The inviter must (still) be allowed to hand out this role: also covers invitations created
+    // before the role-escalation guard existed
+    if (invitation.role_id && invitation.invited_by) {
+      const { data: invitedRole } = await adminSupabase.from('roles').select('id, name, is_system_role, permissions').eq('id', invitation.role_id).maybeSingle();
+      const refusal = invitedRole ? await roleGrantRefusal(adminSupabase, invitation.invited_by, invitedRole) : null;
+      if (refusal) {
+        return NextResponse.json({ error: 'This invitation is no longer valid. Ask your manager for a new one.' }, { status: 403 });
+      }
     }
 
     // 1. Create auth user
@@ -194,6 +208,20 @@ export async function POST(
     if (roleError) {
       logger.error('Failed to assign role', { error: roleError.message, userId, roleId: invitation.role_id });
       // Non-fatal: user can be assigned role later by admin
+    }
+
+    // 3b. Join the projects chosen in the invitation (skipping any archived or completed since)
+    const projectIds: string[] = Array.isArray(invitation.project_ids) ? invitation.project_ids : [];
+    if (projectIds.length) {
+      const { data: openProjects } = await adminSupabase
+        .from('projects').select('id').in('id', projectIds).is('archived_at', null).neq('status', 'complete');
+      const rows = (openProjects || []).map((p: { id: string }) => ({
+        project_id: p.id, user_id: userId, role_in_project: 'member', assigned_by: invitation.invited_by,
+      }));
+      if (rows.length) {
+        const { error: assignError } = await adminSupabase.from('project_assignments').insert(rows);
+        if (assignError) logger.error('Failed to add invited user to projects', { error: assignError.message, userId });
+      }
     }
 
     // 4. Update invitation status

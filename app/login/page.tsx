@@ -21,7 +21,7 @@ export default function Page() {
       .then(res => res.json())
       .then(data => {
         if (data.firstRun) {
-          router.replace('/onboarding')
+          router.replace('/signup')
         }
       })
       .catch(() => {})

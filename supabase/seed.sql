@@ -59,6 +59,10 @@ VALUES
   ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'No Assigned Role', '{}'::jsonb, TRUE, 0, 'Default unassigned role')
 ON CONFLICT (id) DO NOTHING;
 
+-- The company settings row (one per installation). TRUNCATE user_profiles CASCADE above also
+-- empties app_settings, which references users, so it is re-created here.
+INSERT INTO app_settings (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
 -- ============================================================================
 -- ROLE TEMPLATES (ordinary, editable roles)
 -- Migration 20261118000000 inserts these, but the TRUNCATE above removes them

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     // Fetch user profile (include client-specific fields)
     const { data: profile, error } = await supabase
       .from('user_profiles')
-      .select('id, name, email, bio, skills, image, is_client, client_account_id, client_contact_name, client_company_position, created_at, updated_at')
+      .select('id, name, email, bio, skills, image, phone, is_client, client_account_id, client_contact_name, client_company_position, created_at, updated_at')
       .eq('id', userProfile.id)
       .single();
 
@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
-    const { name, bio, skills, client_company_position } = body;
+    const { name, bio, skills, client_company_position, phone } = body;
 
     // Validate that user can only update their own profile
     if (body.id && body.id !== userProfile.id) {
@@ -108,12 +108,20 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    if (phone !== undefined && phone !== null && phone !== "") {
+      // Digits with an optional leading +, spaces, dashes and brackets (used for the WhatsApp click-to-chat link)
+      if (typeof phone !== "string" || !/^\+?[0-9 ()-]{7,20}$/.test(phone.trim()) || phone.replace(/[^0-9]/g, "").length < 7) {
+        return NextResponse.json({ error: "Enter a valid phone number, for example +91 98765 43210" }, { status: 400 });
+      }
+    }
+
     // Prepare update data (only whitelisted fields)
     const updateData: {
       name?: string;
       bio?: string;
       skills?: string[];
       client_company_position?: string | null;
+      phone?: string | null;
       updated_at: string;
     } = {
       updated_at: new Date().toISOString()
@@ -123,6 +131,7 @@ export async function PATCH(request: NextRequest) {
     if (bio !== undefined) updateData.bio = bio;
     if (skills !== undefined) updateData.skills = skills;
     if (client_company_position !== undefined) updateData.client_company_position = client_company_position;
+    if (phone !== undefined) updateData.phone = typeof phone === "string" && phone.trim() ? phone.trim() : null;
 
     logger.info('Updating user profile', {
       action: 'updateProfile',
@@ -135,7 +144,7 @@ export async function PATCH(request: NextRequest) {
       .from('user_profiles')
       .update(updateData)
       .eq('id', userProfile.id)
-      .select('id, name, email, bio, skills, image, is_client, client_account_id, client_contact_name, client_company_position, created_at, updated_at')
+      .select('id, name, email, bio, skills, image, phone, is_client, client_account_id, client_contact_name, client_company_position, created_at, updated_at')
       .single();
 
     if (error) {

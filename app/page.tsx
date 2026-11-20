@@ -30,7 +30,7 @@ export default function Home() {
       .then(data => {
         if (data.firstRun) {
           setIsFirstRun(true)
-          router.replace('/onboarding')
+          router.replace('/signup')
         }
         setFirstRunChecked(true)
       })
