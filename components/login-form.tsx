@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,7 +31,6 @@ export function LoginForm({
   mode = 'login',
   ...props
 }: LoginFormProps) {
-  const _router = useRouter()
   const searchParams = useSearchParams()
   // ?email= is filled in when registration created the account but couldn't sign in automatically
   const [email, setEmail] = useState(() => searchParams.get('email') ?? '')
@@ -172,12 +172,12 @@ export function LoginForm({
                 <div className="flex items-center">
                   <FieldLabel htmlFor="password">Password</FieldLabel>
                   {!isSignUp && (
-                    <a
+                    <Link
                       href="/forgot-password"
                       className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                     >
                       Forgot your password?
-                    </a>
+                    </Link>
                   )}
                 </div>
                 <Input
@@ -227,9 +227,9 @@ export function LoginForm({
                     ) : (
                       <>
                         New company?{' '}
-                        <a href="/signup" className="underline-offset-4 hover:underline">
+                        <Link href="/signup" className="underline-offset-4 hover:underline">
                           Create a workspace
-                        </a>
+                        </Link>
                         <br />
                         <span className="text-xs">Employees and clients: open the invitation link your manager sent you.</span>
                       </>
