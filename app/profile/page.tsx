@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { User, Mail, Building2, Shield, Save, Edit3, AlertCircle, Lock, Bell, Palette } from 'lucide-react'
 import { updateUserProfile, updatePassword } from '@/lib/auth'
+import { passwordMessage } from '@/lib/registration-rules'
 import { RoleGuard } from '@/components/role-guard'
 
 export default function ProfilePage() {
@@ -134,9 +135,10 @@ export default function ProfilePage() {
         return
       }
       
-      // Validate password length
-      if (passwordData.newPassword.length < 6) {
-        setPasswordError('New password must be at least 6 characters long')
+      // Same password rule as registration and Supabase Auth (8+ characters, a letter and a number)
+      const problem = passwordMessage(passwordData.newPassword, (userProfile as { email?: string } | null)?.email ?? user?.email)
+      if (problem) {
+        setPasswordError(problem)
         return
       }
       

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { User, Mail, Building2, Briefcase, Save, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { updatePassword } from '@/lib/auth';
+import { passwordMessage } from '@/lib/registration-rules';
 
 interface ClientProfile {
   id: string;
@@ -149,8 +150,10 @@ export default function ClientProfilePage() {
         return;
       }
 
-      if (passwordData.newPassword.length < 6) {
-        setPasswordError('Password must be at least 6 characters');
+      // Same password rule as registration and Supabase Auth (8+ characters, a letter and a number)
+      const problem = passwordMessage(passwordData.newPassword, profile?.email);
+      if (problem) {
+        setPasswordError(problem);
         return;
       }
 

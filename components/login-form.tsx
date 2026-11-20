@@ -96,7 +96,7 @@ export function LoginForm({
       } else if (err.message?.includes('Email not confirmed')) {
         errorMessage = 'Please check your email and click the confirmation link before logging in.'
       } else if (err.message?.includes('Password should be at least')) {
-        errorMessage = 'Password should be at least 6 characters long.'
+        errorMessage = 'Password needs at least 8 characters, a letter and a number.'
       } else if (err.message?.includes('Invalid email')) {
         errorMessage = 'Please enter a valid email address.'
       } else if (err.message) {

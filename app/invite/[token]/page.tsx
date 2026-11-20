@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { passwordMessage } from '@/lib/registration-rules';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,8 +64,10 @@ export default function InviteAcceptPage() {
 
     if (!password) {
       errors.password = 'Password is required.';
-    } else if (password.length < 8) {
-      errors.password = 'Password must be at least 8 characters.';
+    } else {
+      // Same rule the server applies on acceptance (8+ characters, a letter and a number)
+      const problem = passwordMessage(password, invitation?.email);
+      if (problem) errors.password = problem;
     }
 
     if (!confirmPassword) {

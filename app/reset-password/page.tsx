@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { updatePassword } from "@/lib/auth"
+import { passwordMessage, PASSWORD_MIN } from "@/lib/registration-rules"
 
 function ResetPasswordForm() {
   const [password, setPassword] = useState('')
@@ -40,8 +41,10 @@ function ResetPasswordForm() {
       return
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long')
+    // Same password rule as registration and Supabase Auth (8+ characters, a letter and a number)
+    const problem = passwordMessage(password)
+    if (problem) {
+      setError(problem)
       setIsLoading(false)
       return
     }
@@ -84,7 +87,7 @@ function ResetPasswordForm() {
                     onChange={(e) => { setPassword(e.target.value); }}
                     required
                     disabled={isLoading}
-                    minLength={6}
+                    minLength={PASSWORD_MIN}
                   />
                 </Field>
                 
@@ -98,7 +101,7 @@ function ResetPasswordForm() {
                     onChange={(e) => { setConfirmPassword(e.target.value); }}
                     required
                     disabled={isLoading}
-                    minLength={6}
+                    minLength={PASSWORD_MIN}
                   />
                 </Field>
 
