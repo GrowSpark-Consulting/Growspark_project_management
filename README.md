@@ -187,6 +187,8 @@ npm run dev                 # http://localhost:3100
 | `npm run test:db` | Database tests on an in-memory Postgres (no Docker needed): migrations from a clean database, row-level security and triggers as real users, code-vs-schema drift, UI-to-API wiring. See [tests/db/README.md](tests/db/README.md). |
 | `npm run e2e:local` | End-to-end API flows as 9 real test users against the running app and local Docker Supabase (seeds its own data). See [tests/local-e2e/README.md](tests/local-e2e/README.md). |
 | `npm run e2e:local:registration` | **Resets the local database**, then tests company registration on a brand-new installation (browser + API) and re-creates the test users |
+| `npm run e2e:local:onboarding` | **Resets the local database.** The full onboarding journey in a real browser: register → `/manager`, logout/login, session persistence, duplicate and simultaneous registrations, employee and client invitations, security checks |
+| `npm run local:fresh -- --reset-local-db` | Empties the local database so you can register your own company at `/signup`. Like the other reset commands, it refuses if the database holds accounts that aren't `@example.com` test accounts (add `--wipe-local-accounts` to override) |
 | `npm run e2e:local:browser` | Browser pass: login as each role, landing page and role guards, every main screen (screenshots in `tests/local-e2e/output/`) |
 | `npm run e2e:local:build` / `npm run e2e:local:start` | Production build and server using the **local** Supabase settings, for testing in production mode without touching hosted keys. Rebuild normally before deploying. |
 | `npm test` | Unit tests (Vitest) |
