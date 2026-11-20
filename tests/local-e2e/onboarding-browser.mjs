@@ -188,8 +188,10 @@ async function main() {
     await ep.fill('#invite-password', EMPLOYEE.password);
     await ep.fill('#invite-confirm-password', EMPLOYEE.password);
     await ep.locator('button:not([disabled])', { hasText: /accept|create|join/i }).first().click();
-    const accepted = await ep.getByText('Account Created!').waitFor({ timeout: 30000 }).then(() => true).catch(() => false);
-    report.record('E-accept-in-browser', accepted, 'invitation page → "Account Created!"');
+    // Accepting signs the new employee in and opens their portal (a brand-new employee may be moved to the tutorial)
+    const accepted = await waitPath(ep, (p) => ['/dashboard', '/welcome'].includes(p), 45000);
+    report.record('E-accept-in-browser', accepted, `invitation accepted → signed in automatically → ${path_(ep)}`);
+    await ectx.clearCookies(); // sign out, then prove the chosen password works on the login page
     await loginUI(ep, EMPLOYEE.email, EMPLOYEE.password);
     const empLanded = await waitPath(ep, (p) => p === '/dashboard', 45000);
     await settle(ep);
@@ -226,7 +228,9 @@ async function main() {
     await cp.fill('#client-password', CLIENT.password);
     await cp.fill('#client-confirm-password', CLIENT.password);
     await cp.locator('button:not([disabled])', { hasText: /accept|create|join/i }).first().click();
-    report.record('F-accept-in-browser', await cp.getByText('Account Created!').waitFor({ timeout: 30000 }).then(() => true).catch(() => false), 'client invitation page → "Account Created!"');
+    // Accepting signs the new client in and opens the client portal
+    report.record('F-accept-in-browser', await waitPath(cp, (p) => p.startsWith('/client-portal'), 45000), `client invitation accepted → signed in automatically → ${path_(cp)}`);
+    await cctx.clearCookies(); // sign out, then prove the chosen password works on the login page
     await loginUI(cp, CLIENT.email, CLIENT.password);
     const cLanded = await waitPath(cp, (p) => p.startsWith('/client-portal'), 45000);
     await settle(cp);

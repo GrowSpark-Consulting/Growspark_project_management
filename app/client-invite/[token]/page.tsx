@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { passwordMessage } from '@/lib/registration-rules';
+import { useAuth } from '@/lib/hooks/useAuth';
+import { signInAsInvitedUser, signOutThisBrowser, signedInAsSomeoneElse } from '@/lib/invite-sign-in';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,12 +17,15 @@ interface InvitationDetails {
   inviterName: string;
 }
 
-type PageState = 'loading' | 'form' | 'success' | 'error';
+type PageState = 'loading' | 'form' | 'signing-in' | 'success' | 'error';
 
 export default function ClientInvitePage() {
   const params = useParams();
   const router = useRouter();
   const token = params.token as string;
+  const { user } = useAuth();
+  // Set when the account was created but signing in automatically did not work
+  const [signInProblem, setSignInProblem] = useState<string | null>(null);
 
   const [pageState, setPageState] = useState<PageState>('loading');
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null);
@@ -110,6 +115,15 @@ export default function ClientInvitePage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // Sign this browser in as the new client (replacing anyone signed in here, e.g. the
+        // manager trying the link) and open the client portal; "/" picks it from the profile.
+        setPageState('signing-in');
+        const problem = invitation ? await signInAsInvitedUser(invitation.email, password) : 'invitation details missing';
+        if (!problem) {
+          window.location.replace('/');
+          return;
+        }
+        setSignInProblem(problem);
         setPageState('success');
       } else {
         setFormErrors({ general: data.error || 'Failed to create account. Please try again.' });
@@ -190,6 +204,13 @@ export default function ClientInvitePage() {
                   <span className="font-medium text-gray-900">{invitation.accountName}</span>
                 </div>
               </div>
+
+              {signedInAsSomeoneElse(user?.email, invitation.email) && (
+                <div role="status" className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+                  This browser is signed in as <strong>{user?.email}</strong>. Creating this account signs that
+                  account out here and signs you in as <strong>{invitation.email}</strong>.
+                </div>
+              )}
 
               {/* Account info (email read-only) */}
               <div className="space-y-4">
@@ -322,7 +343,15 @@ export default function ClientInvitePage() {
           </Card>
         )}
 
-        {/* Success State */}
+        {/* Account created, signing in */}
+        {pageState === 'signing-in' && (
+          <div className="text-center" role="status">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
+            <p className="mt-3 text-sm text-gray-600">Account created. Signing you in…</p>
+          </div>
+        )}
+
+        {/* Success State (only shown when signing in automatically did not work) */}
         {pageState === 'success' && (
           <Card>
             <CardHeader className="text-center">
@@ -332,6 +361,7 @@ export default function ClientInvitePage() {
               <CardTitle className="text-2xl">Account Created!</CardTitle>
               <CardDescription className="text-base">
                 Your client portal account has been set up successfully. You can now log in to view your projects.
+                {signInProblem && <> (We couldn&apos;t sign you in automatically: {signInProblem}.)</>}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -350,8 +380,12 @@ export default function ClientInvitePage() {
               <Button
                 className="w-full"
                 size="lg"
-                // Email filled in on the login form: the new user only types the password they just chose
-                onClick={() => router.push(invitation?.email ? `/login?email=${encodeURIComponent(invitation.email)}` : '/login')}
+                // Sign out whoever is signed in on this browser first, otherwise /login would open their portal.
+                // Email filled in on the login form: the new user only types the password they just chose.
+                onClick={async () => {
+                  await signOutThisBrowser();
+                  router.push(invitation?.email ? `/login?email=${encodeURIComponent(invitation.email)}` : '/login');
+                }}
               >
                 Go to Login
                 <ArrowRight className="ml-2 h-4 w-4" />

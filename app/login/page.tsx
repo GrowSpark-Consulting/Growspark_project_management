@@ -8,6 +8,7 @@ import { DemoLoginForm } from "@/components/demo-login-form"
 import { isDemoMode } from "@/lib/demo-mode"
 import { isSupabaseConfigured } from "@/lib/supabase"
 import { landingPathFor, isActiveProfile } from "@/lib/portal"
+import { signOutThisBrowser, signedInAsSomeoneElse } from "@/lib/invite-sign-in"
 
 export default function Page() {
   const { user, userProfile, loading } = useAuth()
@@ -30,6 +31,14 @@ export default function Page() {
   useEffect(() => {
     // Wait until the session and the profile are loaded
     if (loading || !user || !userProfile) return
+    // A link meant for someone else (e.g. a just-invited employee opening it where the manager is
+    // signed in): sign the other account out on this browser and show the login form, rather than
+    // opening the other person's portal
+    const wanted = new URLSearchParams(window.location.search).get('email')
+    if (signedInAsSomeoneElse(user.email, wanted)) {
+      signOutThisBrowser()
+      return
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const profile = userProfile as any
     if (!isActiveProfile(profile)) return
