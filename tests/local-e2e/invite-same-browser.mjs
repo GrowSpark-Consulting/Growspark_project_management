@@ -26,7 +26,7 @@ const EMP = { email: `inv.emp.${RUN}@example.com`, password: 'Employee2026x', na
 const CLI = { email: `inv.cli.${RUN}@example.com`, password: 'Client2026xy', name: 'E2E Temp Client' };
 const made = { users: [], invitations: [], clientInvitations: [], accounts: [] };
 const pathOf = (page) => new URL(page.url()).pathname;
-const EMPLOYEE_PORTAL = ['/dashboard', '/welcome']; // a brand-new employee may be moved to the first-time tutorial
+const EMPLOYEE_PORTAL = ['/dashboard']; // no first-time tutorial: a new employee stays on their dashboard
 
 async function counts() {
   const { count: profiles } = await admin.from('user_profiles').select('id', { count: 'exact', head: true });
@@ -113,6 +113,9 @@ async function main() {
     report.record('EMP-lands-employee-portal', empLanded && !route.includes('/manager'), `after Create Account: ${[...new Set(route)].join(' → ')}`);
     const empMe = await profileFromPage(page);
     report.record('EMP-signed-in-as-employee', empMe.status === 200 && empMe.email === EMP.email, `this browser is now ${empMe.email}`);
+    await page.waitForTimeout(3000);
+    const body = await page.locator('body').innerText();
+    report.record('EMP-no-tutorial', pathOf(page) === '/dashboard' && !/Follow the tutorial|Step d+ of d+/i.test(body), `after 3 s still on ${pathOf(page)}, no tutorial shown`);
     await page.goto(`${env.appUrl}/manager`, { waitUntil: 'load' });
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     report.record('EMP-no-manager-portal', !/Set up your workspace|Active projects/.test(await page.locator('body').innerText()), `employee opens /manager → ${pathOf(page)} (no manager content)`);

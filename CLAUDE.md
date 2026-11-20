@@ -72,7 +72,7 @@ npm run setup:test-roles      # Set up comprehensive test roles
 
 **Deployment model:** Self-hosted VPS/Docker only. No cloud Supabase, no Vercel.
 
-**First-run flow:** `npm run setup` -> `npm run dev` -> visit localhost:3000 -> redirects to `/onboarding` -> setup wizard -> create superadmin -> tutorial. Users are invited by the superadmin via the invitation system (email sent via Nodemailer in production, Inbucket locally).
+**First-run flow:** `npm run setup` -> `npm run dev` -> visit localhost:3100 -> a brand-new installation redirects to `/signup` -> register the company workspace -> signed in as its superadmin on `/manager` (with the setup checklist). Everyone else is invited (link by WhatsApp or email) and lands in their own portal after choosing a password. There is no step-by-step tutorial overlay (removed 2026-11-20).
 
 ### Required Environment Variables
 ```env

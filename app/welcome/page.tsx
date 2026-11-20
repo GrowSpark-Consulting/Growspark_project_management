@@ -250,11 +250,6 @@ export default function WelcomePage() {
   //   return null // Will redirect to dashboard
   // }
 
-  // Check if onboarding tutorial is active
-  const needsOnboarding = userProfile &&
-    'has_completed_onboarding' in userProfile &&
-    (userProfile as any).has_completed_onboarding === false;
-
   return (
     <div className="space-y-8 mt-8 px-4 sm:px-6 lg:px-8">
       {/* Hero Section */}
@@ -263,15 +258,6 @@ export default function WelcomePage() {
           {(userProfile as any)?.name ? `Hello ${(userProfile as any).name}! Welcome Back!` : 'Welcome to Project Management!'}
         </h1>
       </div>
-
-      {/* Onboarding tutorial hint */}
-      {needsOnboarding && (
-        <div className="max-w-2xl mx-auto mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-800 font-medium">
-            Welcome! Follow the tutorial at the bottom of the screen to get oriented.
-          </p>
-        </div>
-      )}
 
       {/* Status Card */}
       {!isSetupComplete && (

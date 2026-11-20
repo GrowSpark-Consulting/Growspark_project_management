@@ -188,8 +188,8 @@ async function main() {
     await ep.fill('#invite-password', EMPLOYEE.password);
     await ep.fill('#invite-confirm-password', EMPLOYEE.password);
     await ep.locator('button:not([disabled])', { hasText: /accept|create|join/i }).first().click();
-    // Accepting signs the new employee in and opens their portal (a brand-new employee may be moved to the tutorial)
-    const accepted = await waitPath(ep, (p) => ['/dashboard', '/welcome'].includes(p), 45000);
+    // Accepting signs the new employee in and opens their portal
+    const accepted = await waitPath(ep, (p) => p === '/dashboard', 45000);
     report.record('E-accept-in-browser', accepted, `invitation accepted → signed in automatically → ${path_(ep)}`);
     await ectx.clearCookies(); // sign out, then prove the chosen password works on the login page
     await loginUI(ep, EMPLOYEE.email, EMPLOYEE.password);
@@ -198,7 +198,7 @@ async function main() {
     await shot(ep, 'E-employee');
     report.record('E-login-lands-dashboard', empLanded, `employee login → ${path_(ep)}`);
     // The server-rendered /manager page must be the refusal. (In the browser a brand-new employee is then
-    // moved to the first-time tutorial on /welcome by the existing tutorial; either way no manager content.)
+    // refused there too; either way no manager content.)
     const mgrHtml = await ep.evaluate(async () => { const r = await fetch('/manager'); return { status: r.status, html: await r.text() }; });
     await ep.goto(`${env.appUrl}/manager`, { waitUntil: 'load' });
     await settle(ep);
