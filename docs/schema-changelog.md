@@ -10,6 +10,14 @@ A short record of every database change, so the Sales & CRM and People & HR team
 
 ---
 
+## 2026-11-22: Account managers can create projects in their account
+
+| Migration | Change |
+|---|---|
+| `20261122001000_project_insert_account_manager.sql` | `projects_insert` policy: a user with `manage_projects` may now also create projects in an account they **manage** (`accounts.account_manager_id`, checked with the existing `user_is_account_manager()`), not only one they are a member of. Matches the app's permission check and the `projects_select` policy. Before, a Project Director who added a client account was refused (42501) when creating its first project. |
+
+**Compatibility:** widens one INSERT policy for account managers who already hold `manage_projects`; nothing else changes. Applied to local Docker only.
+
 ## 2026-11-22: Company registration finishes in one transaction
 
 | Migration | Change |

@@ -763,5 +763,22 @@ export async function run(report) {
     return { pass: r.ok && r.affected === 1, info: describe(r) };
   });
 
+  // ---- Creating projects in an account you manage (accounts.account_manager_id, not a member row)
+  const managed = (await q(`insert into public.accounts (name, account_manager_id) values ('Managed by pm2', $1) returning id`, [U.pm2])).rows[0].id;
+  const empManaged = (await q(`insert into public.accounts (name, account_manager_id) values ('Managed by emp', $1) returning id`, [U.emp])).rows[0].id;
+  const newProject = (uid, acct, name) => asUser(uid, () => tryQ(`insert into public.projects (name, account_id, created_by) values ($1,$2,$3) returning id`, [name, acct, uid]));
+  await check('PRJ-insert-account-manager', 'A user with manage_projects can create a project in an account they manage (not a member)', async () => {
+    const r = await newProject(U.pm2, managed, 'First project of a new client');
+    return { pass: r.ok && r.affected === 1, info: describe(r) };
+  });
+  await check('PRJ-insert-other-account', "manage_projects alone does not allow creating projects in someone else's account", async () => {
+    const r = await newProject(U.pm, managed, 'Not my account');
+    return { pass: denied(r), info: describe(r) };
+  });
+  await check('PRJ-insert-manager-no-permission', 'Managing an account without manage_projects does not allow creating projects', async () => {
+    const r = await newProject(U.emp, empManaged, 'No permission');
+    return { pass: denied(r), info: describe(r) };
+  });
+
   await db.close();
 }
