@@ -350,7 +350,8 @@ export default function ClientInvitePage() {
               <Button
                 className="w-full"
                 size="lg"
-                onClick={() => router.push('/login')}
+                // Email filled in on the login form: the new user only types the password they just chose
+                onClick={() => router.push(invitation?.email ? `/login?email=${encodeURIComponent(invitation.email)}` : '/login')}
               >
                 Go to Login
                 <ArrowRight className="ml-2 h-4 w-4" />
