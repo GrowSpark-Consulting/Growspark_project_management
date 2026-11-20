@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { api, ok, check, HttpError } from '@/lib/api/context'
+import { fileStore } from '@/lib/file-storage'
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const BUCKET = 'project-files'
+// The logo is stored with the project files (Cloudflare R2 when configured, else Supabase Storage)
 const MAX_BYTES = 1024 * 1024 // 1 MB
 // No SVG: an SVG served from this domain can carry script
 const TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' }
@@ -11,10 +11,10 @@ const TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpe
 export const GET = api(async (_request, ctx) => {
   const { data: settings } = await ctx.admin.from('app_settings').select('logo_path').maybeSingle()
   if (!settings?.logo_path) throw new HttpError(404, 'No logo')
-  const { data, error } = await ctx.admin.storage.from(BUCKET).download(settings.logo_path)
-  if (error || !data) throw new HttpError(404, 'No logo')
+  const bytes = await fileStore(ctx.admin).get(settings.logo_path)
+  if (!bytes) throw new HttpError(404, 'No logo')
   const ext = settings.logo_path.split('.').pop()?.toLowerCase() || ''
-  return new NextResponse(Buffer.from(await data.arrayBuffer()), {
+  return new NextResponse(new Uint8Array(bytes), {
     headers: {
       'Content-Type': TYPES[ext] || 'application/octet-stream',
       'X-Content-Type-Options': 'nosniff',
@@ -45,11 +45,15 @@ export const POST = api(async (request, ctx) => {
 
   const { data: current } = await ctx.admin.from('app_settings').select('logo_path').maybeSingle()
   const path = `branding/logo-${Date.now()}.${ext}`
-  const { error: upErr } = await ctx.admin.storage.from(BUCKET).upload(path, bytes, { contentType: TYPES[ext], upsert: false })
-  if (upErr) throw new HttpError(500, `Upload failed: ${upErr.message}`)
+  const store = fileStore(ctx.admin)
+  try {
+    await store.put(path, bytes, TYPES[ext])
+  } catch (e) {
+    throw new HttpError(500, `Upload failed: ${(e as Error).message}`)
+  }
   const row = check(await ctx.admin.from('app_settings')
     .upsert({ id: true, logo_path: path, updated_by: ctx.userId, updated_at: new Date().toISOString() }).select('company_name, logo_path, updated_at').single())
-  if (current?.logo_path) await ctx.admin.storage.from(BUCKET).remove([current.logo_path])
+  if (current?.logo_path) await store.remove([current.logo_path]).catch(() => undefined)
   return ok(row, 201)
 })
 
@@ -58,7 +62,7 @@ export const DELETE = api(async (_request, ctx) => {
   if (!ctx.isSuperadmin) throw new HttpError(403, 'Only a superadmin can change the company logo')
   const { data: current } = await ctx.admin.from('app_settings').select('logo_path').maybeSingle()
   if (current?.logo_path) {
-    await ctx.admin.storage.from(BUCKET).remove([current.logo_path])
+    await fileStore(ctx.admin).remove([current.logo_path])
     check(await ctx.admin.from('app_settings').update({ logo_path: null, updated_by: ctx.userId, updated_at: new Date().toISOString() }).eq('id', true))
   }
   return ok({ removed: !!current?.logo_path })

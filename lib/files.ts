@@ -1,13 +1,15 @@
 /**
- * Project file storage (private Supabase Storage bucket "project-files").
- * Only the server touches objects; users download through short-lived signed URLs.
+ * Project files: the bytes live in private object storage (Cloudflare R2 when configured, otherwise
+ * the Supabase Storage bucket "project-files"; see lib/file-storage.ts), the record in project_files.
+ * Only the server touches objects; users download through 60-second signed links after an access check.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { HttpError, check } from '@/lib/api/context';
+import { fileStore } from '@/lib/file-storage';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export const BUCKET = 'project-files';
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const DOWNLOAD_LINK_SECONDS = 60;
 
 const ALLOWED_EXTENSIONS = new Set([
   'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'txt', 'csv', 'md',
@@ -42,11 +44,12 @@ export async function storeProjectFile(
   const name = safeName(opts.file.name);
   const path = `${opts.projectId}/${id}/${name}`;
   const bytes = Buffer.from(await opts.file.arrayBuffer());
-  const { error: uploadError } = await admin.storage.from(BUCKET).upload(path, bytes, {
-    contentType: opts.file.type || 'application/octet-stream',
-    upsert: false,
-  });
-  if (uploadError) throw new HttpError(500, `Upload failed: ${uploadError.message}`);
+  const store = fileStore(admin);
+  try {
+    await store.put(path, bytes, opts.file.type || 'application/octet-stream');
+  } catch (e) {
+    throw new HttpError(500, `Upload failed: ${(e as Error).message}`);
+  }
   const { data, error } = await admin.from('project_files').insert({
     id,
     project_id: opts.projectId,
@@ -59,25 +62,29 @@ export async function storeProjectFile(
     uploaded_by: opts.uploadedBy,
   }).select('*').single();
   if (error) {
-    await admin.storage.from(BUCKET).remove([path]);
+    await store.remove([path]).catch(() => undefined);
     throw error;
   }
   return data;
 }
 
 export async function signedDownload(admin: any, file: { storage_path: string; file_name: string }) {
-  const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(file.storage_path, 60, { download: file.file_name });
-  if (error || !data?.signedUrl) throw new HttpError(500, 'Could not create download link');
-  return NextResponse.redirect(data.signedUrl, 302);
+  let url: string;
+  try {
+    url = await fileStore(admin).signedDownloadUrl(file.storage_path, file.file_name, DOWNLOAD_LINK_SECONDS);
+  } catch {
+    throw new HttpError(500, 'Could not create download link');
+  }
+  return NextResponse.redirect(url, 302);
 }
 
 export async function deleteProjectFile(admin: any, file: { id: string; storage_path: string }) {
-  await admin.storage.from(BUCKET).remove([file.storage_path]);
+  await fileStore(admin).remove([file.storage_path]);
   check(await admin.from('project_files').delete().eq('id', file.id));
 }
 
 export async function removeProjectFolder(admin: any, projectId: string) {
   const { data } = await admin.from('project_files').select('storage_path').eq('project_id', projectId);
   const paths = (data || []).map((f: any) => f.storage_path);
-  if (paths.length) await admin.storage.from(BUCKET).remove(paths);
+  if (paths.length) await fileStore(admin).remove(paths);
 }
