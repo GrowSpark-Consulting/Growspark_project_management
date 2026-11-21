@@ -24,6 +24,8 @@ export interface Task {
   assigned_to: string | null;
   created_at: string;
   updated_at: string;
+  parent_task_id?: string | null;
+  progress_percent?: number;
   // Joined data
   created_by_user?: {
     id: string;
@@ -455,6 +457,8 @@ class TaskServiceDB {
       assigned_to: (row.assigned_to as string | null) || null,
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
+      parent_task_id: (row.parent_task_id as string | null) ?? null,
+      progress_percent: Number(row.progress_percent ?? 0),
       created_by_user: row.created_by_user as { id: string; name: string; email: string } | undefined,
       assigned_to_user: row.assigned_to_user as { id: string; name: string; email: string } | undefined,
       project: row.project as { id: string; name: string } | undefined,

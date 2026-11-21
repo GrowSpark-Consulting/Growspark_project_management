@@ -212,7 +212,7 @@ function TaskItem({
               <div className="flex items-center justify-between text-xs text-gray-500">
                 <span>0h</span>
                 <span className="font-medium">
-                  {progressPercent}% complete
+                  {progressPercent}% of estimate logged
                 </span>
                 <span>{estimatedHours}h</span>
               </div>
@@ -2762,6 +2762,23 @@ export default function ProjectDetailPage() {
                       })()}
                     </div>
                   </div>
+                  {/* Progress: share of top-level tasks done. Same rule as the Manager dashboard and the client portal. */}
+                  {(() => {
+                    const top = tasks.filter((t: any) => !t.parent_task_id)
+                    const doneCount = top.filter((t: any) => normalizeStatus(t.status) === 'done').length
+                    const pct = top.length ? Math.round((doneCount / top.length) * 100) : 0
+                    return (
+                      <div className="flex items-center gap-2" data-testid="project-progress">
+                        <CheckCircle2 className="w-4 h-4 text-green-600" />
+                        <div className="flex-1">
+                          <p className="text-xs font-medium text-gray-500">Progress</p>
+                          <p className="text-sm font-semibold text-gray-900">{pct}% <span className="text-xs font-normal text-gray-500">· {doneCount} of {top.length} task{top.length === 1 ? '' : 's'} done</span></p>
+                          <div className="mt-1 w-full bg-gray-200 rounded-full h-2"><div className="h-2 rounded-full bg-green-500" style={{ width: `${pct}%` }} /></div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   {/* Progress - Calculated from actual time logged vs project estimate */}
                   {(() => {
                     // Project estimated hours is the total bar width
