@@ -2041,6 +2041,16 @@ export default function ProjectDetailPage() {
               </Button>
             )}
 
+            {/* Resource plan: hours per person, task and week against availability (project managers) */}
+            {canEditProject && (
+              <Button asChild variant="outline">
+                <Link href={`/projects/${projectId}/resources`}>
+                  <Users className="w-4 h-4 mr-2" />
+                  Resource plan
+                </Link>
+              </Button>
+            )}
+
             {/* Workflow Progress Button - Show if project has active workflow */}
             <WorkflowProgressButton
               key={`workflow-button-${workflowRefreshKey}`}
