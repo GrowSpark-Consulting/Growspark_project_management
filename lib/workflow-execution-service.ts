@@ -8,6 +8,7 @@
 
 import { logger } from './debug-logger';
 import { isClientApprovalNode } from './workflow-client-approval';
+import { departmentMemberIds, isInDepartment } from './department-membership';
 
 // Type guard helpers
 function isString(value: unknown): value is string {
@@ -340,6 +341,20 @@ export async function startWorkflowForProject(
 }
 
 /**
+ * People who take a step: for a department step everyone in the department (through a role in it
+ * or added directly), otherwise the holders of the step's role.
+ */
+async function nodeEntityUserIds(supabase: any, node: Record<string, unknown>): Promise<string[]> {
+  if (!isString(node.entity_id)) return [];
+  if (node.node_type === 'department') return departmentMemberIds(supabase, node.entity_id);
+  const { data: userRoles } = await supabase
+    .from('user_roles')
+    .select('user_id')
+    .eq('role_id', node.entity_id);
+  return (userRoles || []).map((ur: any) => ur.user_id).filter(isString);
+}
+
+/**
  * Check if a user has a specific role
  */
 async function userHasRole(supabase: any, userId: string, roleId: string): Promise<boolean> {
@@ -496,14 +511,8 @@ export async function progressWorkflow(
           }
         } else if (nodeType === 'department') {
           // For department nodes, entity_id is a department_id
-          // Check if user has a role in this department
-          const { data: userDeptRoles } = await supabase
-            .from('user_roles')
-            .select('roles!inner(department_id)')
-            .eq('user_id', currentUserId)
-            .eq('roles.department_id', entityId);
-
-          if (!userDeptRoles || userDeptRoles.length === 0) {
+          // The user must be in this department (through a role in it, or added directly)
+          if (!(await isInDepartment(supabase, currentUserId, entityId as string))) {
             // Get department name for error message
             const { data: dept } = await supabase
               .from('departments')
@@ -985,16 +994,8 @@ async function assignProjectToNode(
     if (specificUserId) {
       userIds = [specificUserId];
     } else if (node.entity_id) {
-      // Otherwise, get all users with this role
-      const { data: userRoles } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role_id', node.entity_id);
-
-      userIds = userRoles?.map((ur: any) => {
-        const usrId = ur.user_id;
-        return isString(usrId) ? usrId : '';
-      }).filter((id: any) => id !== '') || [];
+      // Otherwise everyone who takes this step (role holders, or the department's members)
+      userIds = await nodeEntityUserIds(supabase, node);
     }
 
     // Get workflow node details for tracking
@@ -1105,20 +1106,9 @@ async function assignProjectToParallelNodes(
         // Specific user assigned
         userNodeMap.set(assignment.userId, { nodeId, nodeLabel });
       } else {
-        const entityId = assignment.node.entity_id;
-        if (isString(entityId)) {
-          // Get all users with this role
-          const { data: userRoles } = await supabase
-            .from('user_roles')
-            .select('user_id')
-            .eq('role_id', entityId);
-
-          userRoles?.forEach((ur: any) => {
-            const usrId = ur.user_id;
-            if (isString(usrId)) {
-              userNodeMap.set(usrId, { nodeId, nodeLabel });
-            }
-          });
+        // Everyone who takes this step (role holders, or the department's members)
+        for (const usrId of await nodeEntityUserIds(supabase, assignment.node)) {
+          userNodeMap.set(usrId, { nodeId, nodeLabel });
         }
       }
     }
@@ -2351,17 +2341,13 @@ export async function progressWorkflowStep(
             const roleName = requiredRole?.name || 'the required role';
             return {
               success: false,
+              status: 403,
               error: `Only users with the "${roleName}" role can advance this workflow step`
             };
           }
         } else if (currentNode.node_type === 'department') {
-          const { data: userDeptRoles } = await supabase
-            .from('user_roles')
-            .select('roles!inner(department_id)')
-            .eq('user_id', currentUserId)
-            .eq('roles.department_id', currentNode.entity_id);
-
-          if (!userDeptRoles || userDeptRoles.length === 0) {
+          // In the department through a role in it, or added directly
+          if (!(await isInDepartment(supabase, currentUserId, currentNode.entity_id as string))) {
             const { data: dept } = await supabase
               .from('departments')
               .select('name')
@@ -2370,6 +2356,7 @@ export async function progressWorkflowStep(
             const deptName = dept?.name || 'the required department';
             return {
               success: false,
+              status: 403,
               error: `Only users in the "${deptName}" department can advance this workflow step`
             };
           }
@@ -2952,14 +2939,10 @@ export async function progressWorkflowStep(
           };
         }
       } else if (nextNode.node_type === 'department' && nextNode.entity_id && !nodeAssignedUserId) {
-        // Check if there are any users in this department
-        const { data: deptUsers } = await supabase
-          .from('user_roles')
-          .select('user_id, roles!inner(department_id)')
-          .eq('roles.department_id', nextNode.entity_id)
-          .limit(1);
+        // Check if there is anyone in this department (through a role in it, or added directly)
+        const deptUsers = await departmentMemberIds(supabase, nextNode.entity_id as string);
 
-        if (!deptUsers || deptUsers.length === 0) {
+        if (deptUsers.length === 0) {
           // Get department name for better error message
           const { data: deptInfo } = await supabase
             .from('departments')
@@ -2972,7 +2955,7 @@ export async function progressWorkflowStep(
 
           return {
             success: false,
-            error: `Cannot proceed to "${nextNode.label}": No users are assigned to the "${deptName}" department. Please assign at least one user to a role in this department.`
+            error: `Cannot proceed to "${nextNode.label}": Nobody is in the "${deptName}" department yet. Add at least one person to it (Users page or Departments).`
           };
         }
       }

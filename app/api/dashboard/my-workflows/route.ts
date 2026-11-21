@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createApiSupabaseClient, getUserProfileFromRequest } from '@/lib/supabase-server';
 import { logger } from '@/lib/debug-logger';
+import { loadDirectMemberships } from '@/lib/department-membership';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +44,8 @@ export async function GET(request: NextRequest) {
       const roles = Array.isArray(ur.roles) ? ur.roles[0] : ur.roles;
       return roles?.department_id;
     }).filter(Boolean) || [];
+    // People added to a department directly are in it too
+    for (const m of await loadDirectMemberships(supabase, userId)) departmentIds.push(m.department_id);
 
     // 1. Get pending approvals (workflows awaiting user's action)
     // Optimized: Limit to 50 most recent active steps to reduce load

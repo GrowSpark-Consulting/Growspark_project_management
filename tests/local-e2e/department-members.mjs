@@ -4,9 +4,12 @@
 // came only from roles created inside a department; the ready-made roles belong to no department,
 // and the invitation's Department choice was ignored. Now: the invitation's department is applied
 // on acceptance, and departments can be set per person on the Users page (PUT /api/users/[id]/departments).
+// Workflow department steps count such direct members too: project team, notifications, the
+// "Send to Next Step" button, the next-step picker and the right to advance the step.
 //
-// NON-DESTRUCTIVE: no reset, no seed. Temporary @example.com users and a temporary department,
-// all deleted at the end. Local Supabase only.
+// NON-DESTRUCTIVE: no reset, no seed. Temporary @example.com users, a department, an account, a
+// project and a workflow template, all deleted at the end. Local Supabase only. The audit log is
+// append-only, so the department changes made here stay in it (with the deleted user unlinked).
 //
 // Usage: node tests/local-e2e/department-members.mjs   (app running on port 3100)
 import fs from 'node:fs';
@@ -23,7 +26,7 @@ const RUN = Date.now().toString(36);
 const DIRECTOR = { email: `dept.pd.${RUN}@example.com`, password: 'Director2026x', name: 'E2E Temp Director' };
 const MANAGER = { email: `dept.pm.${RUN}@example.com`, password: 'Manager2026x', name: 'E2E Temp Manager' };
 const DEPT = `E2E Dept ${RUN}`;
-const made = { users: [], departments: [] };
+const made = { users: [], departments: [], accounts: [], templates: [] };
 
 async function login(page, u) {
   await page.goto(`${env.appUrl}/login?email=${encodeURIComponent(u.email)}`, { waitUntil: 'load' });
@@ -34,11 +37,17 @@ async function login(page, u) {
 }
 const counts = async () => {
   const c = async (t) => (await admin.from(t).select('*', { count: 'exact', head: true })).count;
-  return { profiles: await c('user_profiles'), departments: await c('departments'), memberships: await c('department_members'), invitations: await c('user_invitations') };
+  return {
+    profiles: await c('user_profiles'), departments: await c('departments'), memberships: await c('department_members'), invitations: await c('user_invitations'),
+    accounts: await c('accounts'), projects: await c('projects'), templates: await c('workflow_templates'),
+  };
 };
 
 async function cleanup() {
   const problems = [];
+  // The account takes its project with it (workflow run, steps, history, team, notifications); then the template
+  for (const id of made.accounts) { const { error } = await admin.from('accounts').delete().eq('id', id); if (error) problems.push(`account: ${error.message}`); }
+  for (const id of made.templates) { const { error } = await admin.from('workflow_templates').delete().eq('id', id); if (error) problems.push(`template: ${error.message}`); }
   const { data } = await admin.auth.admin.listUsers({ perPage: 1000 });
   const pm = (data?.users || []).find((u) => u.email === MANAGER.email);
   // Order matters (foreign keys): manager → invitation → director → department
@@ -122,6 +131,87 @@ async function main() {
     await dp.screenshot({ path: path.join(OUT, 'department-members-users-page.png') }).catch(() => {});
     const { count: back } = await admin.from('department_members').select('*', { count: 'exact', head: true }).eq('user_id', pmProfile.id).eq('department_id', d.id);
     report.record('USERS-page-dialog', saved && shown && back === 1, 'ticked in the Departments dialog → saved, shown in the list, membership stored');
+
+    // The manager is in the department only directly: the Project Manager role belongs to no department
+    report.start('Workflow department steps count people added directly');
+    const { data: acct, error: aErr } = await admin.from('accounts').insert({ name: `E2E Dept Account ${RUN}` }).select('id').single();
+    if (aErr) throw aErr;
+    made.accounts.push(acct.id);
+    const { data: proj, error: prErr } = await admin.from('projects').insert({
+      name: `E2E Dept Project ${RUN}`, account_id: acct.id, status: 'in_progress', priority: 'medium',
+      created_by: pd.user.id, assigned_user_id: pd.user.id, shared_with_client: false,
+    }).select('id').single();
+    if (prErr) throw prErr;
+    await admin.from('project_assignments').insert({ project_id: proj.id, user_id: pd.user.id, role_in_project: 'Project Director' });
+    const { data: tpl, error: tErr } = await admin.from('workflow_templates').insert({ name: `E2E Dept Flow ${RUN}`, description: 'Two department steps', created_by: pd.user.id, is_active: true }).select('id').single();
+    if (tErr) throw tErr;
+    made.templates.push(tpl.id);
+    const STEP1 = `Dept review ${RUN}`, STEP2 = `Dept build ${RUN}`, STEP3 = `Dept sign-off ${RUN}`;
+    const node = async (node_type, label, x, entity_id = null) => {
+      const { data: n, error } = await admin.from('workflow_nodes').insert({ workflow_template_id: tpl.id, node_type, label, entity_id, position_x: x, position_y: 100 }).select('id').single();
+      if (error) throw error;
+      return n.id;
+    };
+    const n0 = await node('start', 'Start', 0), n1 = await node('department', STEP1, 200, d.id), n2 = await node('department', STEP2, 400, d.id);
+    const n3 = await node('department', STEP3, 600, d.id), nEnd = await node('end', 'Done', 800);
+    const { error: cErr } = await admin.from('workflow_connections').insert([[n0, n1], [n1, n2], [n2, n3], [n3, nEnd]].map(([a, b]) => ({ workflow_template_id: tpl.id, from_node_id: a, to_node_id: b })));
+    if (cErr) throw cErr;
+    const activeStep = async (nodeId) => (await admin.from('workflow_active_steps').select('id, assigned_user_id').eq('workflow_instance_id', inst.id).eq('node_id', nodeId).eq('status', 'active').maybeSingle()).data;
+    const notifiedAbout = async (label) => ((await admin.from('notifications').select('message').eq('user_id', pmProfile.id)).data || []).some((n) => (n.message || '').includes(label));
+
+    report.status('WF-start', await call(env, director, 'POST', '/api/workflows/start', { projectId: proj.id, workflowTemplateId: tpl.id }), [200, 201], 'the director starts it; the first step is a department step');
+    const { data: inst } = await admin.from('workflow_instances').select('id').eq('project_id', proj.id).single();
+    const { count: onTeam } = await admin.from('project_assignments').select('*', { count: 'exact', head: true }).eq('project_id', proj.id).eq('user_id', pmProfile.id).is('removed_at', null);
+    report.record('WF-dept-team', onTeam === 1, 'the direct member joined the project team when the step was reached');
+    report.record('WF-dept-notified', await notifiedAbout(STEP1), 'and was told the step is waiting');
+    const elig = await call(env, director, 'GET', `/api/workflows/steps/assignments?workflowInstanceId=${inst.id}&userId=${pmProfile.id}`);
+    const second = (elig.body?.nodes || []).find((x) => x.id === n2);
+    report.record('WF-dept-eligible', elig.status === 200 && second?.user_eligible === true, `can be assigned "${STEP2}": ${second?.user_eligible}`);
+
+    // In the browser: the button is offered, and the next department step lists its members to pick from
+    pm = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+    await login(pm, MANAGER);
+    await pm.goto(`${env.appUrl}/projects/${proj.id}`, { waitUntil: 'load' });
+    const send = pm.getByRole('button', { name: 'Send to Next Step' }).first();
+    report.record('WF-dept-button', await send.waitFor({ timeout: 30000 }).then(() => true).catch(() => false), 'project page offers "Send to Next Step"');
+    await send.click();
+    const dlg = pm.getByRole('dialog');
+    const counted = await dlg.getByText('1 user available for assignment').waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+    await dlg.getByRole('combobox').first().click().catch(() => {});
+    const listed = await pm.getByRole('option', { name: `${STEP2} - ${MANAGER.name}` }).waitFor({ timeout: 10000 }).then(() => true).catch(() => false);
+    await pm.screenshot({ path: path.join(OUT, 'department-members-workflow-picker.png') }).catch(() => {});
+    report.record('WF-dept-picker', counted && listed, `the picker for "${STEP2}" lists the department's member`);
+    await pm.keyboard.press('Escape');
+    await pm.keyboard.press('Escape');
+
+    // Moving on with nobody picked: the department has a member (direct only), so the next step is created for the department
+    const s1 = await activeStep(n1);
+    report.status('WF-dept-advance', await call(env, pmApi, 'POST', '/api/workflows/progress', { workflowInstanceId: inst.id, activeStepId: s1?.id }), 200, `the direct member completes "${STEP1}"`);
+    const s2 = await activeStep(n2);
+    report.record('WF-dept-next-step', !!s2 && s2.assigned_user_id === null && await notifiedAbout(STEP2), `"${STEP2}" is active for the department and its member was told`);
+
+    // In the browser the member picks themself for the next step
+    await pm.goto(`${env.appUrl}/projects/${proj.id}`, { waitUntil: 'load' });
+    await pm.getByRole('button', { name: 'Send to Next Step' }).first().click({ timeout: 30000 });
+    const dlg2 = pm.getByRole('dialog');
+    await dlg2.getByRole('combobox').first().click({ timeout: 20000 });
+    await pm.getByRole('option', { name: `${STEP3} - ${MANAGER.name}` }).click({ timeout: 10000 });
+    await dlg2.getByRole('button', { name: 'Send to Next Step' }).click();
+    const sent = await pm.getByText('Project sent to next step successfully').waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+    const s3 = await activeStep(n3);
+    report.record('WF-dept-assigned', sent && s3?.assigned_user_id === pmProfile.id, `"${STEP3}" assigned to the member picked in the dialog`);
+
+    // A step assigned in the department: someone outside it cannot advance it (an unassigned step is open to the whole project team)
+    const outsider = await call(env, director, 'POST', '/api/workflows/progress', { workflowInstanceId: inst.id, activeStepId: s3?.id });
+    report.record('WF-dept-outsider', outsider.status === 403 && /department/.test(outsider.body?.error || ''), `someone outside the department: ${outsider.status} ${outsider.body?.error}`);
+
+    // The member finishes the workflow from the project page
+    await pm.goto(`${env.appUrl}/projects/${proj.id}`, { waitUntil: 'load' });
+    await pm.getByRole('button', { name: 'Send to Next Step' }).first().click({ timeout: 30000 });
+    await pm.getByRole('dialog').getByRole('button', { name: 'Send to Next Step' }).click({ timeout: 20000 });
+    const toast = await pm.getByText('Project sent to next step successfully').waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+    const { data: fin } = await admin.from('workflow_instances').select('status').eq('id', inst.id).single();
+    report.record('WF-dept-complete', toast && fin?.status === 'completed', `finished in the browser → workflow ${fin?.status}`);
   } finally {
     await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 15000))]);
     await cleanup();

@@ -4,6 +4,7 @@ import { checkPermissionHybrid } from '@/lib/permission-checker';
 import { Permission } from '@/lib/permissions';
 import { verifyWorkflowInstanceAccess } from '@/lib/access-control-server';
 import { logger } from '@/lib/debug-logger';
+import { loadDirectMemberships } from '@/lib/department-membership';
 
 /**
  * GET /api/workflows/steps/assignments
@@ -128,6 +129,8 @@ export async function GET(request: NextRequest) {
           })
           .filter((id): id is string => id !== null);
       }
+      // People added to a department directly are in it too
+      for (const m of await loadDirectMemberships(supabase, targetUserId)) targetUserDepartmentIds.push(m.department_id);
     }
 
     // Get all assignments for this workflow instance

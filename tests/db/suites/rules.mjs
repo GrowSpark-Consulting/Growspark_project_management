@@ -822,6 +822,16 @@ export async function run(report) {
     const byAdmin = await asUser(U.admin, () => tryQ(`delete from public.department_members where department_id = $1 and user_id = $2`, [dept, U.emp2]));
     return { pass: denied(byEmp) && byAdmin.ok && byAdmin.affected === 1, info: `employee: ${describe(byEmp)}; admin: ${describe(byAdmin)}` };
   });
+  await check('WF-notify-department', 'An unassigned department step notifies its members, through a role in it or added directly, and nobody else', async () => {
+    // pm is a direct member (added above); emp gets a role inside the department; emp2 was removed
+    const deptRole = (await q(`insert into public.roles (name, permissions, is_system_role, hierarchy_level, department_id) values ('Tech Lead (test)', '{}', false, 30, $1) returning id`, [dept])).rows[0].id;
+    await q(`insert into public.user_roles (user_id, role_id) values ($1,$2)`, [U.emp, deptRole]);
+    const deptNode = (await q(`insert into public.workflow_nodes (workflow_template_id, node_type, label, entity_id) values ($1,'department','Tech review',$2) returning id`, [tpl, dept])).rows[0].id;
+    await q(`insert into public.workflow_active_steps (workflow_instance_id, node_id, branch_id, status) values ($1,$2,'d1','active')`, [wi, deptNode]);
+    const got = async (uid) => (await q(`select 1 from public.notifications where user_id = $1 and type = 'workflow_step' and message like '%Tech review%'`, [uid])).rows.length;
+    const direct = await got(U.pm), viaRole = await got(U.emp), outside = await got(U.emp2);
+    return { pass: direct === 1 && viaRole === 1 && outside === 0, info: `direct member ${direct}, role member ${viaRole}, not in the department ${outside}` };
+  });
   await check('DEPT-member-cascade', 'Deleting a department removes its memberships', async () => {
     await q(`delete from public.departments where id = $1`, [dept]);
     const left = (await q(`select count(*)::int n from public.department_members where department_id = $1`, [dept])).rows[0].n;

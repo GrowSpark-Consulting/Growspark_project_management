@@ -10,6 +10,14 @@ A short record of every database change, so the Sales & CRM and People & HR team
 
 ---
 
+## 2026-11-22: Workflow department steps notify direct department members
+
+| Migration | Change |
+|---|---|
+| `20261122001300_workflow_department_direct_members.sql` | `notify_workflow_step_active()` also notifies people added to the step's department directly (`department_members`), not only holders of a role in it. Same function otherwise; the trigger is unchanged. |
+
+**Compatibility:** replaces one trigger function; no table changes. Applied to local Docker only.
+
 ## 2026-11-22: Users who appear in the audit log can be deleted
 
 | Migration | Change |

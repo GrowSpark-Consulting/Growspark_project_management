@@ -66,3 +66,23 @@ export async function departmentMemberIds(supabase: any, departmentId: string): 
   if (!error) for (const d of direct || []) ids.add(d.user_id);
   return [...ids];
 }
+
+/** Whether one person is in a department (role-based or direct). */
+export async function isInDepartment(supabase: any, userId: string, departmentId: string): Promise<boolean> {
+  const { data: viaRole } = await supabase
+    .from('user_roles').select('roles!inner(department_id)')
+    .eq('user_id', userId).eq('roles.department_id', departmentId).limit(1);
+  if ((viaRole?.length || 0) > 0) return true;
+  const { data: direct, error } = await supabase
+    .from('department_members').select('user_id')
+    .eq('user_id', userId).eq('department_id', departmentId).limit(1);
+  return !error && (direct?.length || 0) > 0;
+}
+
+/** Everyone in a department with name and email, for "assign to" pickers. */
+export async function departmentMemberProfiles(supabase: any, departmentId: string): Promise<Array<{ id: string; name: string; email: string }>> {
+  const ids = await departmentMemberIds(supabase, departmentId);
+  if (!ids.length) return [];
+  const { data } = await supabase.from('user_profiles').select('id, name, email').in('id', ids).order('name');
+  return data || [];
+}

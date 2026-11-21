@@ -31,6 +31,7 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
 import { isClientApprovalNode } from '@/lib/workflow-client-approval';
+import { departmentMemberProfiles, profileDepartmentIds } from '@/lib/department-membership';
 
 interface WorkflowProgressButtonProps {
   projectId: string;
@@ -124,6 +125,19 @@ function _renderMarkdownContent(content: string): React.ReactNode {
     }
     return <span key={index}>{part}</span>;
   });
+}
+
+// People who can be picked for a step: the department's members for a department step (through a role
+// in it or added directly), otherwise holders of the step's role. Null when the step names nobody.
+async function loadNodeUsers(supabase: any, node: any): Promise<User[] | null> {
+  if (!node?.entity_id) return null;
+  if (node.node_type === 'department') return departmentMemberProfiles(supabase, node.entity_id);
+  const { data: userRoles } = await supabase
+    .from('user_roles')
+    .select('user_id, users!user_roles_user_id_fkey(id, name, email)')
+    .eq('role_id', node.entity_id);
+  if (!userRoles) return null;
+  return (userRoles as any[]).map((ur: any) => ur.users).filter((u: any) => u !== null) as User[];
 }
 
 // The node this button would progress: the given active step's node, else the current node, else the
@@ -510,11 +524,8 @@ export function WorkflowProgressButton({
           }
         } else if (currentNode.node_type === 'department') {
           // For department nodes, entity_id is a department_id
-          // Check if user has any role in this department
-          const userDeptIds = userProfile.user_roles
-            ?.map((ur: any) => (ur.roles as any)?.department_id)
-            .filter(Boolean) || [];
-          const hasAccess = userDeptIds.includes(currentNode.entity_id);
+          // The user must be in this department (through a role in it, or added directly)
+          const hasAccess = profileDepartmentIds(userProfile as any).includes(currentNode.entity_id);
           setHasRequiredRole(hasAccess);
 
           // Get department name for display if user doesn't have access
@@ -977,45 +988,16 @@ export function WorkflowProgressButton({
               const usersMap: Record<string, User[]> = {};
 
               for (const node of allNextNodes) {
-                if ((node as any).entity_id) {
-                  const { data: userRoles } = await supabase
-                    .from('user_roles')
-                    .select(`
-                      user_id,
-                      users!user_roles_user_id_fkey(id, name, email)
-                    `)
-                    .eq('role_id', (node as any).entity_id);
-
-                  if (userRoles) {
-                    const users = (userRoles as any[])
-                      .map((ur: any) => ur.users)
-                      .filter((u: any) => u !== null) as User[];
-                    usersMap[(node as any).id] = users;
-                  }
-                }
+                const users = await loadNodeUsers(supabase, node);
+                if (users) usersMap[(node as any).id] = users;
               }
 
               setUsersPerNode(usersMap);
               setSelectedUserPerNode({}); // Reset selections
             } else {
               // Single next node - use legacy availableUsers
-              const singleNode = allNextNodes[0];
-              if ((singleNode as any).entity_id) {
-                const { data: userRoles } = await supabase
-                  .from('user_roles')
-                  .select(`
-                    user_id,
-                    users!user_roles_user_id_fkey(id, name, email)
-                  `)
-                  .eq('role_id', (singleNode as any).entity_id);
-
-                if (userRoles) {
-                  const users = (userRoles as any[])
-                    .map((ur: any) => ur.users)
-                    .filter((u: any) => u !== null) as User[];
-                  setAvailableUsers(users);
-                }
-              }
+              const users = await loadNodeUsers(supabase, allNextNodes[0]);
+              if (users) setAvailableUsers(users);
             }
           }
         }
