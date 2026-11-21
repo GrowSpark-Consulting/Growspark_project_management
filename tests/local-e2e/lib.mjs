@@ -76,13 +76,30 @@ export async function resetLocalDb(env, { log = console.log } = {}) {
   }
   log('Resetting the LOCAL database (supabase db reset --local)…');
   execSync('npx supabase db reset --local', { cwd: ROOT, stdio: 'ignore' });
-  // The API gateway needs a moment after the reset
-  for (let i = 0; i < 30; i++) {
-    const { error: e } = await adminClient(env).from('app_settings').select('id').limit(1);
-    if (!e) return;
+  // The reset restarts the Auth and Storage services too: wait until the database, Auth and Storage
+  // all answer, otherwise the first sign-up or sign-in right after a reset fails.
+  // A restarted service can come back on a new address while the API gateway (Kong) keeps the old
+  // one (HTTP 502). If that lasts, restart this project's gateway once.
+  let gatewayRestarted = false;
+  for (let i = 0; i < 60; i++) {
+    const a = adminClient(env);
+    const [db, auth, storage] = await Promise.all([
+      a.from('app_settings').select('id').limit(1),
+      a.auth.admin.listUsers({ perPage: 1 }).catch((e) => ({ error: e })),
+      a.storage.listBuckets().catch((e) => ({ error: e })),
+    ]);
+    if (!db.error && !auth.error && !storage.error) return;
+    if (i >= 10 && !gatewayRestarted && [auth.error, storage.error].some((e) => e && (e.status === 502 || /502|Bad Gateway/.test(String(e.message))))) {
+      const projectId = (fs.readFileSync(path.join(ROOT, 'supabase', 'config.toml'), 'utf8').match(/^project_id\s*=\s*"([^"]+)"/m) || [])[1];
+      if (projectId) {
+        log(`The API gateway still points at the old Auth/Storage address; restarting supabase_kong_${projectId}…`);
+        execSync(`docker restart supabase_kong_${projectId}`, { stdio: 'ignore' });
+        gatewayRestarted = true;
+      }
+    }
     await new Promise((r) => setTimeout(r, 2000));
   }
-  throw new Error('The local database did not come back after the reset');
+  throw new Error('The local database, Auth or Storage did not come back after the reset');
 }
 
 /** Sign in like the browser does and return the auth cookie header plus a user-scoped client. */
