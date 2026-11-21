@@ -189,6 +189,10 @@ async function main() {
     report.status('WF-dept-advance', await call(env, pmApi, 'POST', '/api/workflows/progress', { workflowInstanceId: inst.id, activeStepId: s1?.id }), 200, `the direct member completes "${STEP1}"`);
     const s2 = await activeStep(n2);
     report.record('WF-dept-next-step', !!s2 && s2.assigned_user_id === null && await notifiedAbout(STEP2), `"${STEP2}" is active for the department and its member was told`);
+    // Nobody is assigned to it, but it is still the department's step: others on the project team are refused
+    const outsiderOpen = await call(env, director, 'POST', '/api/workflows/progress', { workflowInstanceId: inst.id, activeStepId: s2?.id });
+    const { data: stillOpen } = await admin.from('workflow_active_steps').select('status').eq('id', s2?.id).single();
+    report.record('WF-dept-outsider-unassigned', outsiderOpen.status === 403 && stillOpen?.status === 'active', `someone on the project but outside the department: ${outsiderOpen.status} ${outsiderOpen.body?.error}`);
 
     // In the browser the member picks themself for the next step
     await pm.goto(`${env.appUrl}/projects/${proj.id}`, { waitUntil: 'load' });
@@ -201,7 +205,7 @@ async function main() {
     const s3 = await activeStep(n3);
     report.record('WF-dept-assigned', sent && s3?.assigned_user_id === pmProfile.id, `"${STEP3}" assigned to the member picked in the dialog`);
 
-    // A step assigned in the department: someone outside it cannot advance it (an unassigned step is open to the whole project team)
+    // A step assigned in the department: someone outside it cannot advance it either
     const outsider = await call(env, director, 'POST', '/api/workflows/progress', { workflowInstanceId: inst.id, activeStepId: s3?.id });
     report.record('WF-dept-outsider', outsider.status === 403 && /department/.test(outsider.body?.error || ''), `someone outside the department: ${outsider.status} ${outsider.body?.error}`);
 

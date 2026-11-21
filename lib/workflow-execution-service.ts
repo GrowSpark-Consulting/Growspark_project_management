@@ -2291,31 +2291,8 @@ export async function progressWorkflowStep(
         }
       }
 
-      // CHECK: If node has NO assignments at all, allow any project member to progress
-      // This handles the "anyone on project if no one assigned" requirement
-      if (!hasNodeAssignment && currentNode) {
-        // Check if there are ANY assignments to this node
-        const { count } = await supabase
-          .from('workflow_node_assignments')
-          .select('id', { count: 'exact', head: true })
-          .eq('workflow_instance_id', workflowInstanceId)
-          .eq('node_id', currentNode.id);
-
-        const nodeHasNoAssignments = (count ?? 0) === 0;
-
-        // Also check if the active step has no specific assigned user
-        const stepHasNoAssignment = !activeStep?.assigned_user_id;
-
-        // If node has no assignments AND step has no assignment, treat as "anyone can progress"
-        if (nodeHasNoAssignments && stepHasNoAssignment) {
-          logger.debug('Node has no assignments - allowing any project member to progress', {
-            nodeId: currentNode.id,
-            nodeLabel: currentNode.label,
-            userId: currentUserId
-          });
-          hasNodeAssignment = true; // Allow this user to proceed
-        }
-      }
+      // A step nobody is assigned to is still limited to its role / department (checked below), as on
+      // the project page. Steps without a role or department stay open to the project team.
 
       // 1. PROJECT ASSIGNMENT CHECK
       if (instance.project_id) {
