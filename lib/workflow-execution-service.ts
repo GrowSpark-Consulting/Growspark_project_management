@@ -7,6 +7,7 @@
  */
 
 import { logger } from './debug-logger';
+import { isClientApprovalNode } from './workflow-client-approval';
 
 // Type guard helpers
 function isString(value: unknown): value is string {
@@ -2168,7 +2169,7 @@ export async function progressWorkflowStep(
   assignedUserId?: string,
   inlineFormData?: Record<string, Record<string, unknown>>,
   assignedUsersPerNode?: Record<string, string> // NEW: map of nodeId -> userId for parallel branches
-): Promise<{ success: boolean; nextNode?: Record<string, unknown>; newActiveSteps?: WorkflowActiveStep[]; error?: string }> {
+): Promise<{ success: boolean; nextNode?: Record<string, unknown>; newActiveSteps?: WorkflowActiveStep[]; error?: string; status?: number }> {
   if (!supabase) {
     return { success: false, error: 'Database connection failed' };
   }
@@ -2264,6 +2265,12 @@ export async function progressWorkflowStep(
 
     if (!currentNode) {
       return { success: false, error: 'Current node not found' };
+    }
+
+    // The client decides a client-approval step in the client portal (clientApproveProject /
+    // clientRejectProject); nobody inside the company can pass it for them.
+    if (isClientApprovalNode(currentNode)) {
+      return { success: false, status: 409, error: "This step is waiting for the client's approval in the client portal" };
     }
 
     // AUTHORIZATION: Check if user can progress this workflow step

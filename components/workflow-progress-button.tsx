@@ -30,6 +30,7 @@ import { createClientSupabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
+import { isClientApprovalNode } from '@/lib/workflow-client-approval';
 
 interface WorkflowProgressButtonProps {
   projectId: string;
@@ -125,6 +126,26 @@ function _renderMarkdownContent(content: string): React.ReactNode {
   });
 }
 
+// The node this button would progress: the given active step's node, else the current node, else the
+// newest active step's node. Read from the workflow's snapshot, or the live table for older workflows.
+async function loadStepNode(supabase: any, instance: any, workflowInstanceId: string, activeStepId?: string | null) {
+  let nodeId: string | null = instance?.current_node_id ?? null;
+  if (activeStepId) {
+    const { data: step } = await supabase.from('workflow_active_steps').select('node_id').eq('id', activeStepId).maybeSingle();
+    nodeId = step?.node_id ?? nodeId;
+  } else if (!nodeId) {
+    const { data: steps } = await supabase.from('workflow_active_steps').select('node_id')
+      .eq('workflow_instance_id', workflowInstanceId).eq('status', 'active')
+      .order('activated_at', { ascending: false }).limit(1);
+    nodeId = steps?.[0]?.node_id ?? null;
+  }
+  if (!nodeId) return null;
+  const fromSnapshot = (instance?.started_snapshot?.nodes || []).find((n: any) => n.id === nodeId);
+  if (fromSnapshot) return fromSnapshot;
+  const { data: live } = await supabase.from('workflow_nodes').select('node_type, label, settings').eq('id', nodeId).maybeSingle();
+  return live ?? null;
+}
+
 export function WorkflowProgressButton({
   projectId,
   workflowInstanceId,
@@ -168,6 +189,9 @@ export function WorkflowProgressButton({
   const [nextNodes, setNextNodes] = useState<NextNodePreview[]>([]);
   const [usersPerNode, setUsersPerNode] = useState<Record<string, User[]>>({});
   const [selectedUserPerNode, setSelectedUserPerNode] = useState<Record<string, string>>({});
+
+  // Label of the current step when it is a client approval (decided in the client portal), else null
+  const [clientApprovalStep, setClientApprovalStep] = useState<string | null>(null);
 
   // Stale data detection - track when workflow was last loaded vs current state
   const [_isStaleData, setIsStaleData] = useState(false);
@@ -299,6 +323,7 @@ export function WorkflowProgressButton({
   useEffect(() => {
     async function checkAccessPermissions() {
       setCheckingAccessPermissions(true);
+      setClientApprovalStep(null);
 
       if (!workflowInstanceId || !userProfile) {
         // No workflow instance - don't show button at all (handled by render)
@@ -340,6 +365,10 @@ export function WorkflowProgressButton({
           ...(instance as any),
           workflow_nodes: currentNodeFromSnapshot
         };
+
+        // A client-approval step is decided by the client in the client portal, for everyone here
+        const stepNode = await loadStepNode(supabase, instance, workflowInstanceId, externalActiveStepId);
+        setClientApprovalStep(isClientApprovalNode(stepNode) ? String(stepNode?.label || 'This step') : null);
 
         // Check if user is superadmin (bypasses all checks)
         const userIsSuperadmin = (userProfile as any).is_superadmin ||
@@ -1381,6 +1410,19 @@ export function WorkflowProgressButton({
   const isSyncNode = currentNode?.node_type === 'sync';
   // formTemplate is loaded from either inline settings or linked form_template_id
   const _hasFormTemplate = formTemplate !== null;
+
+  // The client approves this step in the client portal; the server refuses it from here too
+  if (clientApprovalStep !== null) {
+    return (
+      <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+        <Clock className="w-4 h-4 text-blue-600 flex-shrink-0" />
+        <div className="text-blue-800">
+          <span className="font-medium">Waiting for the client:</span>{' '}
+          &quot;{clientApprovalStep}&quot; is approved by the client in the client portal.
+        </div>
+      </div>
+    );
+  }
 
 
   return (
