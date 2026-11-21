@@ -45,9 +45,9 @@ export default function ManagerTimesheetsPage() {
           <p className="text-gray-600 mt-1">Review and approve weekly hours of your team (hours on projects you manage)</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => setWeek((w) => format(addDays(parseISO(w), -7), 'yyyy-MM-dd'))}><ChevronLeft className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" aria-label="Previous week" onClick={() => setWeek((w) => format(addDays(parseISO(w), -7), 'yyyy-MM-dd'))}><ChevronLeft className="h-4 w-4" /></Button>
           <span className="text-sm font-medium w-36 text-center">Week of {formatDay(week)}</span>
-          <Button variant="outline" size="icon" onClick={() => setWeek((w) => format(addDays(parseISO(w), 7), 'yyyy-MM-dd'))}><ChevronRight className="h-4 w-4" /></Button>
+          <Button variant="outline" size="icon" aria-label="Next week" onClick={() => setWeek((w) => format(addDays(parseISO(w), 7), 'yyyy-MM-dd'))}><ChevronRight className="h-4 w-4" /></Button>
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
