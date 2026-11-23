@@ -30,7 +30,14 @@ export function db(): PrismaClient {
   if (!cache.__pmPrisma) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error('DATABASE_URL is not set');
-    const adapter = new PrismaPg({ connectionString, max: Number(process.env.DB_POOL_MAX) || 10 });
+    // Sized for one long-running server (Render) behind Supabase's session pooler, where every app
+    // and Supabase itself share the plan's connection limit (60 on the Free plan).
+    const adapter = new PrismaPg({
+      connectionString,
+      max: Number(process.env.DB_POOL_MAX) || 5,
+      idleTimeoutMillis: 30_000, // hand idle connections back to the pooler
+      connectionTimeoutMillis: 10_000, // fail fast when the database cannot be reached
+    });
     cache.__pmPrisma = new PrismaClient({ adapter });
   }
   return cache.__pmPrisma;
