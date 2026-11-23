@@ -29,6 +29,14 @@ for (const key of ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL']) {
     process.exit(1);
   }
 }
+// The direct database connection (lib/db) must be local too; its host is shown, never its password
+if (vars.DATABASE_URL) {
+  const host = new URL(vars.DATABASE_URL).hostname;
+  if (!['127.0.0.1', 'localhost'].includes(host)) {
+    console.error(`Refusing to run: DATABASE_URL in .env.development.local is not local (${host}).`);
+    process.exit(1);
+  }
+}
 for (const key of ['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
   if (!vars[key]) { console.error(`Refusing to run: ${key} is missing from .env.development.local.`); process.exit(1); }
 }
