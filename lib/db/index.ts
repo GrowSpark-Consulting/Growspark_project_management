@@ -72,6 +72,27 @@ export async function withUser<T>(userId: string, fn: (tx: Tx) => Promise<T>, op
   );
 }
 
+/** Role signed-out requests run as (`anon` on Supabase), so row-level security applies to them too. */
+export function anonRole(): string {
+  const role = process.env.DB_ANON_ROLE || 'anon';
+  if (!ROLE_NAME.test(role)) throw new Error('DB_ANON_ROLE is not a valid role name');
+  return role;
+}
+
+/** Run fn with no signed-in user, as the anonymous role (row-level security applies). */
+export async function withAnon<T>(fn: (tx: Tx) => Promise<T>, options: Pick<Options, 'timeoutMs'> = {}): Promise<T> {
+  const role = anonRole();
+  return db().$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(`set local role "${role}"`);
+      await tx.$queryRaw`select set_config('request.jwt.claims', ${JSON.stringify({ role: 'anon' })}, true),
+                                set_config('request.jwt.claim.role', 'anon', true)`;
+      return fn(tx);
+    },
+    { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+  );
+}
+
 /** Run fn as the server itself (no user). Only after the API has checked the caller's access. */
 export async function withSystem<T>(fn: (tx: Tx) => Promise<T>, options: Pick<Options, 'timeoutMs'> = {}): Promise<T> {
   return db().$transaction((tx) => fn(tx), { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });

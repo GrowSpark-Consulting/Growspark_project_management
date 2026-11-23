@@ -4,6 +4,12 @@ import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { logger } from './debug-logger';
 import { loadDirectMemberships } from './department-membership';
+import { withQueryLayer, queryLayerEnabled, userRunner } from './db/query';
+
+// Phase 11: with DATABASE_URL set, `.from()` and `.rpc()` on these clients run through Prisma
+// (lib/db/query.ts) instead of the Supabase Data API; Auth and Storage still use Supabase.
+// The user's clients run as the signed-in user (row-level security applies); the admin client runs
+// as the server, where the service-role key was used before.
 
 // Configure global fetch timeout to prevent connection timeout errors
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -51,7 +57,7 @@ export const createServerSupabase = async () => {
   const supabaseUrl = getServerSupabaseUrl();
   const supabasePublishableKey = getSupabasePublishableKey();
   const cookieStore = await cookies();
-  return createServerClient(supabaseUrl!, supabasePublishableKey!, {
+  const client = createServerClient(supabaseUrl!, supabasePublishableKey!, {
     cookieOptions: {
       name: 'sb-project-management-auth',
     },
@@ -84,6 +90,7 @@ export const createServerSupabase = async () => {
       },
     },
   });
+  return queryLayerEnabled() ? withQueryLayer(client, userRunner(client.auth)) : client;
 };
 
 // API route Supabase client (for use in API routes with NextRequest)
@@ -134,7 +141,7 @@ export const createApiSupabaseClient = (request: NextRequest) => {
     }
   });
 
-  return createServerClient(supabaseUrl!, supabasePublishableKey!, {
+  const client = createServerClient(supabaseUrl!, supabasePublishableKey!, {
     cookieOptions: {
       name: 'sb-project-management-auth',
     },
@@ -161,6 +168,7 @@ export const createApiSupabaseClient = (request: NextRequest) => {
       },
     },
   });
+  return queryLayerEnabled() ? withQueryLayer(client, userRunner(client.auth)) : client;
 };
 
 // Admin client for privileged operations (user creation, setup tokens)
@@ -169,7 +177,8 @@ export const createAdminSupabaseClient = () => {
   const url = getServerSupabaseUrl();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return null;
-  return createClient(url, serviceKey);
+  const client = createClient(url, serviceKey);
+  return queryLayerEnabled() ? withQueryLayer(client, { kind: 'system' }) : client;
 };
 
 // Alias for backwards compatibility
