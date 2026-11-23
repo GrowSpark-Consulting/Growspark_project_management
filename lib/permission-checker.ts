@@ -15,7 +15,6 @@
  * to ensure proper RLS context. Client-side code can omit the parameter.
  */
 
-import { createClientSupabase } from './supabase';
 import type { AppSupabaseClient } from './supabase';
 import { UserWithRoles, PermissionContext } from './rbac-types';
 import { Permission } from './permissions';
@@ -56,6 +55,20 @@ function getCacheKey(userId: string, permission: Permission, context?: Permissio
 /**
  * Check if user is superadmin (bypasses all permission checks)
  */
+// In the browser (no server client given) the database lookups below run in /api/me/access, on the
+// server as the signed-in user, with the same logic; the browser does not query the database.
+const inBrowser = () => typeof window !== 'undefined';
+async function remoteAccess<T>(params: Record<string, string>, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`/api/me/access?${new URLSearchParams(params)}`, { credentials: 'include' });
+    if (!res.ok) return fallback;
+    const body = await res.json();
+    return (body?.data ?? fallback) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export function isSuperadmin(userProfile: UserWithRoles | null): boolean {
   if (!userProfile) return false;
 
@@ -78,7 +91,8 @@ export function isSuperadmin(userProfile: UserWithRoles | null): boolean {
  * @param supabaseClient - Optional authenticated Supabase client (REQUIRED for server-side, optional for client-side)
  */
 export async function isAssignedToProject(userId: string, projectId: string, supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
-  const supabase = supabaseClient || createClientSupabase();
+  if (!supabaseClient && inBrowser()) return remoteAccess({ check: 'project', userId, projectId }, false);
+  const supabase = supabaseClient as any;
   if (!supabase) return false;
 
   // First check the project itself - if user is creator or assigned user, they have access
@@ -153,7 +167,7 @@ export async function managesDepartment(userProfile: UserWithRoles | null, depar
  * @param supabaseClient - Optional authenticated Supabase client
  */
 async function getAccountProjects(accountId: string, supabaseClient?: AppSupabaseClient | null): Promise<string[]> {
-  const supabase = supabaseClient || createClientSupabase();
+  const supabase = supabaseClient as any;
   if (!supabase) return [];
 
   const { data, error } = await supabase
@@ -176,7 +190,8 @@ async function getAccountProjects(accountId: string, supabaseClient?: AppSupabas
  * @param supabaseClient - Optional authenticated Supabase client (REQUIRED for server-side, optional for client-side)
  */
 export async function hasAccountAccess(userId: string, accountId: string, supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
-  const supabase = supabaseClient || createClientSupabase();
+  if (!supabaseClient && inBrowser()) return remoteAccess({ check: 'account', userId, accountId }, false);
+  const supabase = supabaseClient as any;
   if (!supabase) return false;
 
   // Check if user is a member of the account
@@ -248,7 +263,8 @@ export async function isAssignedToWorkflowNode(
 ): Promise<boolean> {
   if (!userProfile) return false;
 
-  const supabase = supabaseClient || createClientSupabase();
+  if (!supabaseClient && inBrowser()) return remoteAccess({ check: 'workflow-node', workflowInstanceId }, false);
+  const supabase = supabaseClient as any;
   if (!supabase) return false;
 
   // Get the workflow instance and current node
@@ -372,16 +388,21 @@ async function hasBasePermission(userProfile: UserWithRoles | null, permission: 
     return false;
   }
 
-  const supabase = supabaseClient || createClientSupabase();
-  if (!supabase) {
-    logger.error('Supabase client not available', { userId: userProfile.id, permission });
-    return false;
+  type RoleRow = { id: string; name: string; permissions: Record<string, boolean> | null };
+  let roles: RoleRow[] | null = null;
+  let error: Error | null = null;
+  if (!supabaseClient && inBrowser()) {
+    roles = await remoteAccess({ check: 'roles', roleIds: roleIds.join(',') }, null);
+    if (!roles) error = new Error('Could not load role permissions');
+  } else {
+    if (!supabaseClient) {
+      logger.error('Supabase client not available', { userId: userProfile.id, permission });
+      return false;
+    }
+    const result = await supabaseClient.from('roles').select('id, name, permissions').in('id', roleIds);
+    roles = result.data as RoleRow[] | null;
+    error = result.error as unknown as Error | null;
   }
-
-  const { data: roles, error } = await supabase
-    .from('roles')
-    .select('id, name, permissions')
-    .in('id', roleIds);
 
   if (error) {
     logger.error('Error fetching role permissions', { userId: userProfile.id }, error);
@@ -548,16 +569,13 @@ export async function checkPermissionHybrid(
         const accountAccess = await hasAccountAccess(userProfile.id, context.accountId, supabaseClient);
         if (accountAccess) {
           // Double-check this project is in the account they have access to
-          const supabase = supabaseClient || createClientSupabase();
-          if (supabase) {
-            const { data: project } = await supabase
-              .from('projects')
-              .select('account_id')
-              .eq('id', context.projectId)
-              .single();
-            if (project && project.account_id === context.accountId) {
-              hasAccess = true;
-            }
+          const projectAccountId = !supabaseClient && inBrowser()
+            ? await remoteAccess<string | null>({ check: 'project-account', projectId: context.projectId }, null)
+            : supabaseClient
+              ? ((await supabaseClient.from('projects').select('account_id').eq('id', context.projectId).single()).data?.account_id ?? null)
+              : null;
+          if (projectAccountId && projectAccountId === context.accountId) {
+            hasAccess = true;
           }
         }
       }
@@ -646,15 +664,16 @@ export async function getUserPermissions(userProfile: UserWithRoles | null, supa
   const roleIds = userProfile.user_roles.map((ur: any) => ur.role_id).filter(Boolean);
   if (roleIds.length === 0) return [];
 
-  const supabase = supabaseClient || createClientSupabase();
-  if (!supabase) return [];
+  let roles: { permissions: Record<string, boolean> | null }[] | null;
+  if (!supabaseClient && inBrowser()) {
+    roles = await remoteAccess({ check: 'roles', roleIds: roleIds.join(',') }, null);
+  } else {
+    if (!supabaseClient) return [];
+    const { data, error } = await supabaseClient.from('roles').select('permissions').in('id', roleIds);
+    roles = error ? null : data;
+  }
 
-  const { data: roles, error } = await supabase
-    .from('roles')
-    .select('permissions')
-    .in('id', roleIds);
-
-  if (error || !roles) return [];
+  if (!roles) return [];
 
   const permissionsSet = new Set<Permission>();
   

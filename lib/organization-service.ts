@@ -1,4 +1,3 @@
-import { createClientSupabase } from './supabase';
 import { roleManagementService, RoleHierarchyNode } from './role-management-service';
 import { logger, databaseQuery, databaseError, performance } from './debug-logger';
 
@@ -72,7 +71,7 @@ export interface HierarchyView {
 class OrganizationService {
   // db: the signed-in user's client when run on the server (the org chart calls /api/org-structure/chart)
   private async getSupabase(db?: any) {
-    return db ?? createClientSupabase();
+    return db;
   }
 
   // Get complete organization structure

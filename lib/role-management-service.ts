@@ -1,5 +1,4 @@
 
-import { createClientSupabase } from './supabase';
 import { Permission } from './permissions';
 import { logger, databaseQuery, databaseError, roleManagement, performance } from './debug-logger';
 import { validateRole } from './validation';
@@ -94,8 +93,8 @@ class RoleManagementService {
     if (providedClient) {
       return providedClient;
     }
-    // Fall back to client-side Supabase (for browser)
-    return createClientSupabase();
+
+    return null; // runs on the server only: callers pass the signed-in user's client
   }
 
   // CRUD operations

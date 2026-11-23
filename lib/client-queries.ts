@@ -74,6 +74,25 @@ export const setRemainingHours = (projectId: string, hours: number) =>
 /** Delete a project (the API checks the project-manager permission). */
 export const deleteProject = (projectId: string) => wrap(apiSend(`/api/projects/${projectId}`, 'DELETE'));
 
+/**
+ * Superadmin setup tools and database status checks: the same functions as before, run on the server
+ * (POST /api/admin/diagnostics). Each returns the function's own result; a refused or failed request
+ * returns { success: false } with the reason.
+ */
+const diagnostics = (action: string, extra: Record<string, unknown> = {}) =>
+  apiSend('/api/admin/diagnostics', 'POST', { action, ...extra })
+    .then((b) => b?.data)
+    .catch((e: unknown) => {
+      const message = e instanceof Error ? e.message : 'Request failed';
+      return { success: false, message, error: message };
+    });
+export const assignSuperadminRoleByEmail = (email: string) => diagnostics('assign-superadmin', { email });
+export const checkSuperadminRoleByEmail = (email: string) => diagnostics('check-superadmin', { email });
+export const removeSuperadminRoleByEmail = (email: string) => diagnostics('remove-superadmin', { email });
+export const testDatabaseConnection = () => diagnostics('test-connection');
+export const checkDatabaseSchema = () => diagnostics('check-schema');
+export const testUserProfileCreation = (userId: string, email: string, name: string) => diagnostics('test-profile-creation', { userId, email, name });
+
 /** The create-project dialogs: accounts and active workflows to pick from, and creating the project. */
 export const newProjectOptions = () => wrap<{ accounts: any[] | null; workflows: any[] | null }>(apiGet('/api/projects/new'));
 export const createProjectFromDialog = (p: {

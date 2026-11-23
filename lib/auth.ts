@@ -2,7 +2,7 @@
 import { createClientSupabase } from './supabase';
 import { UserProfile, UserRole, Role, Department } from './supabase';
 import { logger } from './debug-logger';
-import { loadDirectMemberships, type DirectMembership } from './department-membership';
+import { type DirectMembership } from './department-membership';
 
 // Authentication helper functions
 
@@ -46,100 +46,6 @@ export async function getCurrentUser() {
 }
 
 /**
- * OPTIMIZED: Get user profile with roles in a SINGLE query
- * This combines what was previously 2-3 separate queries into one
- */
-async function fetchUserProfileOptimized(supabase: any, userId: string) {
-  // Single query to get profile with all role data
-  const { data: profile, error } = await supabase
-    .from('user_profiles')
-    .select(`
-      *,
-      user_roles!user_roles_user_id_fkey (
-        id,
-        role_id,
-        assigned_at,
-        assigned_by,
-        roles!user_roles_role_id_fkey (
-          id,
-          name,
-          department_id,
-          permissions,
-          is_system_role,
-          departments!roles_department_id_fkey (
-            id,
-            name,
-            description
-          )
-        )
-      )
-    `)
-    .eq('id', userId)
-    .single();
-
-  if (error) {
-    // Handle relationship ambiguity by falling back to separate queries
-    if (error.code === 'PGRST201') {
-      return await fetchUserProfileFallback(supabase, userId);
-    }
-    // Handle no profile found
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    logger.error('Error fetching user profile', {}, error as unknown as Error);
-    return null;
-  }
-
-  return profile;
-}
-
-/**
- * Fallback: Fetch profile and roles separately if join fails
- */
-async function fetchUserProfileFallback(supabase: any, userId: string) {
-  // Get profile first
-  const { data: profile, error: profileError } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
-  if (profileError || !profile) {
-    return null;
-  }
-
-  // Get roles separately
-  const { data: userRoles, error: rolesError } = await supabase
-    .from('user_roles')
-    .select(`
-      id,
-      role_id,
-      assigned_at,
-      assigned_by,
-      roles!user_roles_role_id_fkey (
-        id,
-        name,
-        department_id,
-        permissions,
-        is_system_role,
-        departments!roles_department_id_fkey (
-          id,
-          name,
-          description
-        )
-      )
-    `)
-    .eq('user_id', userId);
-
-  if (rolesError) {
-    logger.error('Error fetching user roles', {}, rolesError as unknown as Error);
-    return { ...profile, user_roles: [] };
-  }
-
-  return { ...profile, user_roles: userRoles || [] };
-}
-
-/**
  * Get the current user's profile with roles (client-side only)
  * OPTIMIZED: Uses a single query to fetch profile + roles + permissions
  * This reduces load time from 10+ seconds to ~1 second
@@ -153,20 +59,15 @@ export async function getCurrentUserProfile() {
       return null;
     }
 
-    const supabase = createClientSupabase();
-    if (!supabase) {
+    // Profile with roles and direct department memberships, loaded on the server as the user
+    const response = await fetch('/api/me/profile', { credentials: 'include', cache: 'no-store' });
+    if (!response.ok) {
       return null;
     }
-
-    // Use optimized single query - fetches profile + roles + permissions in ONE call
-    const profile = await fetchUserProfileOptimized(supabase, user.id);
-
+    const profile = (await response.json())?.data;
     if (!profile) {
       return null;
     }
-
-    // Departments the user was added to directly (separate query: never blocks sign-in)
-    profile.department_members = await loadDirectMemberships(supabase, user.id);
 
     // Type the return properly
     return profile as UserProfile & {
@@ -292,73 +193,6 @@ export async function signUpWithEmail(email: string, password: string, name: str
     
     // Log actual unexpected errors
     logger.error('Unexpected error in signUpWithEmail', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-    }, error as Error);
-    throw error;
-  }
-}
-
-/**
- * Create user profile in the database
- * @param userId - User's ID from Supabase Auth
- * @param email - User's email
- * @param name - User's name
- * @returns Created user profile
- */
-export async function createUserProfile(userId: string, email: string, name: string) {
-  try {
-    const supabase = createClientSupabase();
-    if (!supabase) {
-      throw new Error('Supabase not configured');
-    }
-
-    if (process.env.NODE_ENV === 'development') {
-      logger.debug('Creating user profile for', { userId, email, name });
-    }
-
-    const { data, error } = await (supabase as any)
-      .from('user_profiles')
-      .insert([{
-        id: userId,
-        email,
-        name,
-        image: null,
-        bio: null,
-        skills: [],
-        workload_sentiment: null,
-      }])
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Error creating user profile', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code,
-      });
-      
-      // Check if it's an RLS policy error
-      if (error.message?.includes('row-level security policy')) {
-        throw new Error(`Failed to create user profile: Row Level Security policy is blocking user creation. Please run the RLS setup script in Supabase SQL Editor.`);
-      }
-      
-      // Check if it's a permission error
-      if (error.message?.includes('permission denied')) {
-        throw new Error(`Failed to create user profile: Permission denied. Please check RLS policies.`);
-      }
-      
-      // Check if it's a constraint error
-      if (error.message?.includes('duplicate key')) {
-        throw new Error(`Failed to create user profile: User profile already exists.`);
-      }
-      
-      throw new Error('Failed to create user profile');
-    }
-
-    return data;
-  } catch (error: unknown) {
-    logger.error('Error in createUserProfile', {
       message: error instanceof Error ? error.message : 'Unknown error',
     }, error as Error);
     throw error;

@@ -32,7 +32,6 @@ import {
 import { cn } from '@/lib/utils';
 import { Permission } from '@/lib/permissions';
 import { isSuperadmin, isUnassigned, hasPermission, isAccountManager } from '@/lib/rbac';
-import { createClientSupabase } from '@/lib/supabase';
 
 interface NavigationItem {
   name: string;
@@ -238,9 +237,8 @@ export function Navigation() {
 
           // Special case: Account managers also get access to Accounts page
           if (item.name === 'Accounts' && !hasAnyPerm) {
-            const supabase = createClientSupabase();
-            if (supabase) {
-              const isManager = await isAccountManager(userProfile, supabase);
+            {
+              const isManager = await isAccountManager(userProfile);
               // Check cancellation after async operation
               if (filterOperationRef.current.cancelled || filterOperationRef.current.userId !== operationId) {
                 return;

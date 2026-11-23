@@ -1,12 +1,13 @@
+// Runs on the server as the signed-in user (POST /api/admin/diagnostics).
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { createClientSupabase } from './supabase';
 
 /**
  * Check if the database schema is properly set up
  * @returns Object with check results
  */
-export async function checkDatabaseSchema() {
-  const supabase = createClientSupabase();
+export async function checkDatabaseSchema(db: any) {
+  const supabase = db;
   if (!supabase) {
     return {
       success: false,
@@ -107,8 +108,8 @@ export async function checkDatabaseSchema() {
  * @param name - Test name
  * @returns Test result
  */
-export async function testUserProfileCreation(userId: string, email: string, name: string) {
-  const supabase = createClientSupabase();
+export async function testUserProfileCreation(userId: string, email: string, name: string, db: any) {
+  const supabase = db;
   if (!supabase) {
     return {
       success: false,

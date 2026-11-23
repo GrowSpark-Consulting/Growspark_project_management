@@ -1,5 +1,4 @@
 
-import { createClientSupabase } from './supabase';
 import type { AppSupabaseClient } from './supabase';
 
 // Helper functions for status mapping
@@ -105,7 +104,7 @@ class AccountService {
   // Get account by ID with related data
   async getAccountById(accountId: string, userMap?: { [key: string]: Record<string, unknown> }, supabaseClient?: AppSupabaseClient | null): Promise<AccountWithProjects | null> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return null;
       }
@@ -147,7 +146,7 @@ class AccountService {
   // Get all accounts
   async getAllAccounts(supabaseClient?: AppSupabaseClient | null): Promise<Account[]> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return [];
       }
@@ -170,7 +169,7 @@ class AccountService {
   // Check if a user can edit a specific project
   async canUserEditProject(userId: string, projectId: string, supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return false;
       }
@@ -303,7 +302,7 @@ class AccountService {
   // Check if a user can access a specific account
   async canUserAccessAccount(userId: string, accountId: string, supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return false;
       }
@@ -377,7 +376,7 @@ class AccountService {
   // Check if user has FULL (edit) access to account (not just read-only via project stakeholder)
   async hasFullAccountAccess(userId: string, accountId: string, supabaseClient?: AppSupabaseClient | null): Promise<boolean> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return false;
       }
@@ -424,7 +423,7 @@ class AccountService {
   // Get accounts that a user has access to (through projects, membership, or as account manager)
   async getUserAccounts(userId: string, supabaseClient?: AppSupabaseClient | null): Promise<Account[]> {
     try {
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
       if (!supabase) {
         return [];
       }
@@ -583,7 +582,7 @@ class AccountService {
   async getAccountProjects(accountId: string, userMap?: { [key: string]: Record<string, unknown> }, supabaseClient?: AppSupabaseClient | null): Promise<ProjectWithDetails[]> {
     try {
       // Use provided client, or fall back to singleton (less reliable)
-      const supabase = supabaseClient || createClientSupabase();
+      const supabase = supabaseClient;
 
       if (!supabase) {
         return [];
@@ -941,267 +940,6 @@ class AccountService {
     }
   }
 
-  // Create a new project for an account
-  async createProject(accountId: string, projectData: {
-    name: string;
-    description?: string;
-    start_date?: string;
-    end_date?: string;
-    status?: string;
-    assigned_user_id?: string;
-  }, createdBy?: string): Promise<Project | null> {
-    try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        return null;
-      }
-
-      const insertData = {
-        name: projectData.name,
-        description: projectData.description || null,
-        account_id: accountId,
-        priority: 'medium' as const,
-        start_date: projectData.start_date || null,
-        end_date: projectData.end_date || null,
-        status: (projectData.status || 'planning') as 'planning' | 'in_progress' | 'review' | 'complete' | 'on_hold',
-        created_by: createdBy || null,
-        assigned_user_id: projectData.assigned_user_id || null,
-      };
-
-      const { data, error } = await supabase
-        .from('projects')
-        .insert(insertData as any)
-        .select()
-        .single();
-
-      if (error) {
-        return null;
-      }
-
-      const typedData = data as Project | null;
-      return typedData;
-    } catch {
-      return null;
-    }
-  }
-
-  // Update project
-  async updateProject(projectId: string, updates: Partial<Project>): Promise<Project | null> {
-    try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        return null;
-      }
-
-      // First, let's check if the project exists
-      const { error: fetchError } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', projectId)
-        .single();
-
-      if (fetchError) {
-        return null;
-      }
-
-      // Convert updates to proper type, allowing partial updates
-      const updateData: Partial<Project> = {};
-      const updateKeys = Object.keys(updates) as Array<string>;
-      for (const key of updateKeys) {
-        const value = (updates as any)[key];
-        if (value !== undefined) {
-          (updateData as Record<string, unknown>)[key] = value;
-        }
-      }
-
-      const { data, error } = await (supabase as any)
-        .from('projects')
-        .update(updateData)
-        .eq('id', projectId)
-        .select()
-        .single();
-
-      if (error) {
-        return null;
-      }
-
-      return data;
-    } catch {
-      return null;
-    }
-  }
-
-  // Delete project
-  async deleteProject(projectId: string): Promise<boolean> {
-    try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        return false;
-      }
-
-      const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', projectId);
-
-      if (error) {
-        return false;
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // Get all users for assignment
-  async getAllUsers(): Promise<User[]> {
-    try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        return [];
-      }
-
-      // Get all users with their roles, account memberships, and department memberships
-      const { data: users, error: usersError } = await supabase
-        .from('user_profiles')
-        .select(`
-          *,
-          user_roles!user_roles_user_id_fkey(
-            role_id,
-            roles!user_roles_role_id_fkey(
-              id,
-              name,
-              department_id
-            )
-          ),
-          account_members(
-            account_id
-          )
-        `)
-        .order('name');
-
-      // If the complex query fails, fall back to a simpler approach with manual filtering
-      if (usersError || !users) {
-        const { data: simpleUsers, error: simpleError } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .order('name');
-
-        if (simpleError) {
-          return [];
-        }
-        
-        // Now manually check each user for roles, account memberships, and department memberships
-        const filteredUsers: User[] = [];
-
-        const typedSimpleUsers = (simpleUsers || []) as User[];
-
-        for (const user of typedSimpleUsers) {
-          type UserRoleWithRole = {
-            role_id: string;
-            roles?: {
-              id: string;
-              name: string;
-              department_id: string | null;
-            } | null;
-          };
-
-          // Check if user has any roles
-          const { data: userRoles } = await supabase
-            .from('user_roles')
-            .select('role_id, roles:role_id(id, name, department_id)')
-            .eq('user_id', user.id);
-
-          // Check if user has any account memberships
-          const { data: accountMembers } = await supabase
-            .from('account_members')
-            .select('account_id')
-            .eq('user_id', user.id);
-
-          const typedUserRoles = (userRoles || []) as unknown as UserRoleWithRole[];
-
-          const hasRoles = typedUserRoles.length > 0;
-          const hasAccountMemberships = accountMembers && accountMembers.length > 0;
-          const hasDepartmentMemberships = typedUserRoles.some((ur:any) => {
-            const roles = ur.roles;
-            return roles && roles.department_id;
-          });
-
-          const hasAnyMembership = hasRoles || hasAccountMemberships || hasDepartmentMemberships;
-
-          if (hasAnyMembership) {
-            filteredUsers.push(user);
-          }
-        }
-
-        return filteredUsers;
-      }
-
-      if (usersError) {
-        return [];
-      }
-
-      if (!users || users.length === 0) {
-        return [];
-      }
-
-      type UserWithRelations = User & {
-        user_roles?: {
-          role_id: string;
-          roles?: {
-            id: string;
-            name: string;
-            department_id: string | null;
-          } | null;
-        }[] | null;
-        account_members?: {
-          account_id: string;
-        }[] | null;
-      };
-
-      const typedUsers = users as unknown as UserWithRelations[];
-
-      // Filter users who have at least one role, account membership, or department membership
-      const filteredUsers = typedUsers.filter((user:any) => {
-        const userRoles = user.user_roles;
-        const accountMembers = user.account_members;
-
-        // Check if user has any roles
-        const hasRoles = userRoles && userRoles.length > 0;
-
-        // Check if user has any account memberships
-        const hasAccountMemberships = accountMembers && accountMembers.length > 0;
-
-        // Check if user has any department memberships through roles
-        const hasDepartmentMemberships = userRoles?.some((ur:any) => {
-          const roles = ur.roles;
-          return roles && roles.department_id;
-        }) || false;
-
-        // User must have at least one of: roles, account memberships, or department memberships
-        return hasRoles || hasAccountMemberships || hasDepartmentMemberships;
-      });
-
-      // Clean up the data structure to match the expected User interface
-      const cleanedUsers: User[] = filteredUsers.map((user:any) => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        image: user.image,
-        bio: user.bio,
-        skills: user.skills,
-        workload_sentiment: user.workload_sentiment,
-        is_superadmin: user.is_superadmin,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      }));
-
-      return cleanedUsers;
-    } catch {
-      return [];
-    }
-  }
 }
 
 // Export singleton instance

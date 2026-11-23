@@ -5,7 +5,6 @@
  */
 
 
-import { createClientSupabase } from '../supabase';
 import type { AppSupabaseClient } from '../supabase';
 import { logger } from '../debug-logger';
 
@@ -47,7 +46,7 @@ class AvailabilityService {
     weekStartDate?: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<AvailabilityWithSchedule | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     const targetWeek = weekStartDate || this.getWeekStartDate();
@@ -72,33 +71,6 @@ class AvailabilityService {
   }
 
   /**
-   * Get user availability for multiple weeks
-   */
-  async getUserAvailabilityRange(
-    userId: string,
-    startWeek: string,
-    endWeek: string
-  ): Promise<AvailabilityWithSchedule[]> {
-    const supabase = createClientSupabase();
-    if (!supabase) return [];
-
-    const { data, error } = await supabase
-      .from('user_availability')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('week_start_date', startWeek)
-      .lte('week_start_date', endWeek)
-      .order('week_start_date', { ascending: true });
-
-    if (error) {
-      logger.error('Error fetching user availability range', {}, error as Error);
-      return [];
-    }
-
-    return (data as AvailabilityWithSchedule[]) || [];
-  }
-
-  /**
    * Set or update user availability for a week
    */
   async setUserAvailability(
@@ -109,7 +81,7 @@ class AvailabilityService {
     notes?: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<AvailabilityWithSchedule | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     // Check if record exists
@@ -169,7 +141,7 @@ class AvailabilityService {
     weekStartDate: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<boolean> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return false;
 
     const { error } = await supabase
@@ -187,83 +159,12 @@ class AvailabilityService {
   }
 
   /**
-   * Copy availability to multiple weeks (for recurring patterns)
-   */
-  async copyAvailabilityToWeeks(
-    userId: string,
-    sourceWeek: string,
-    targetWeeks: string[]
-  ): Promise<boolean> {
-    const source = await this.getUserAvailability(userId, sourceWeek);
-    if (!source) return false;
-
-    const supabase = createClientSupabase();
-    if (!supabase) return false;
-
-    const insertData: UserAvailabilityInsert[] = targetWeeks.map((week: any) => ({
-      user_id: userId,
-      week_start_date: week,
-      available_hours: source.available_hours,
-      schedule_data: source.schedule_data as Record<string, unknown> | null,
-      notes: source.notes,
-    }));
-
-     
-    const { error } = await supabase
-      .from('user_availability')
-      .upsert(insertData as any);
-
-    if (error) {
-      logger.error('Error copying availability', {}, error as Error);
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
    * Calculate total hours from schedule data
    */
   calculateTotalHours(schedule: WeeklySchedule): number {
     return Object.values(schedule).reduce((sum, hours) => sum + (hours || 0), 0);
   }
 
-  /**
-   * Get team availability for a department
-   */
-  async getDepartmentAvailability(
-    departmentId: string,
-    weekStartDate: string
-  ): Promise<AvailabilityWithSchedule[]> {
-    const supabase = createClientSupabase();
-    if (!supabase) return [];
-
-    // Get all users in the department
-    const { data: userRoles, error: rolesError } = await supabase
-      .from('user_roles')
-      .select('user_id, roles!inner(department_id)')
-      .eq('roles.department_id', departmentId);
-
-    if (rolesError || !userRoles) {
-      logger.error('Error fetching department users', {}, rolesError as Error);
-      return [];
-    }
-
-    const userIds = [...new Set(userRoles.map((ur: any) => ur.user_id as string))];
-
-    const { data, error } = await supabase
-      .from('user_availability')
-      .select('*')
-      .in('user_id', userIds)
-      .eq('week_start_date', weekStartDate);
-
-    if (error) {
-      logger.error('Error fetching department availability', {}, error as Error);
-      return [];
-    }
-
-    return (data as AvailabilityWithSchedule[]) || [];
-  }
 }
 
 // Export singleton instance

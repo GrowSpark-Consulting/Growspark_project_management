@@ -3,7 +3,6 @@
  * Calculates and provides capacity metrics across users, departments, and organization
  */
 
-import { createClientSupabase } from '../supabase';
 import type { AppSupabaseClient } from '../supabase';
 import { availabilityService } from './availability-service';
 import { DEFAULT_WEEKLY_HOURS } from '../constants';
@@ -67,7 +66,7 @@ class CapacityService {
     weekStartDate: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<UserCapacityMetrics | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     // OPTIMIZATION: Calculate week end date once
@@ -222,7 +221,7 @@ class CapacityService {
     weekStartDate: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<DepartmentCapacityMetrics | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     // OPTIMIZATION: Parallelize department info and user roles queries
@@ -295,7 +294,7 @@ class CapacityService {
     weekStartDate: string,
     supabaseClient?: AppSupabaseClient | null
   ): Promise<ProjectCapacityMetrics | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     // OPTIMIZATION: Calculate week end date once
@@ -393,7 +392,7 @@ class CapacityService {
    * Get organization-wide capacity metrics for a specific week
    */
   async getOrgCapacityMetrics(weekStartDate: string, supabaseClient?: AppSupabaseClient | null): Promise<OrgCapacityMetrics | null> {
-    const supabase = supabaseClient || createClientSupabase();
+    const supabase = supabaseClient;
     if (!supabase) return null;
 
     // Get all departments

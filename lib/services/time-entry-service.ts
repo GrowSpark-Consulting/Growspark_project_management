@@ -4,7 +4,6 @@
  */
 
 
-import { createClientSupabase } from '../supabase';
 import { logger } from '../debug-logger';
 
 type TimeEntry = any;
@@ -40,46 +39,6 @@ class TimeEntryService {
   }
 
   /**
-   * Log time on a task
-   */
-  async logTime(
-    taskId: string,
-    userId: string,
-    projectId: string,
-    hoursLogged: number,
-    entryDate: string,
-    description?: string
-  ): Promise<TimeEntry | null> {
-    const supabase = createClientSupabase();
-    if (!supabase) return null;
-
-    const weekStartDate = this.getWeekStartDate(new Date(entryDate));
-
-    const insertData: TimeEntryInsert = {
-      task_id: taskId,
-      user_id: userId,
-      project_id: projectId,
-      hours_logged: hoursLogged,
-      entry_date: entryDate,
-      week_start_date: weekStartDate,
-      description: description || null,
-    };
-
-    const { data, error } = await (supabase as any)
-      .from('time_entries')
-      .insert([insertData])
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Error logging time', {}, error as Error);
-      return null;
-    }
-
-    return data;
-  }
-
-  /**
    * Get time entries for a user
    */
   async getUserTimeEntries(
@@ -88,7 +47,7 @@ class TimeEntryService {
     endDate?: string,
     db?: any
   ): Promise<TimeEntryWithDetails[]> {
-    const supabase = db ?? createClientSupabase();
+    const supabase = db;
     if (!supabase) return [];
 
     let query = supabase
@@ -124,7 +83,7 @@ class TimeEntryService {
    * Get time entries for a task
    */
   async getTaskTimeEntries(taskId: string, db?: any): Promise<TimeEntryWithDetails[]> {
-    const supabase = db ?? createClientSupabase();
+    const supabase = db;
     if (!supabase) return [];
 
     const { data, error } = await supabase
@@ -154,7 +113,7 @@ class TimeEntryService {
     weekStartDate?: string,
     db?: any
   ): Promise<TimeEntryWithDetails[]> {
-    const supabase = db ?? createClientSupabase();
+    const supabase = db;
     if (!supabase) return [];
 
     let query = supabase
@@ -183,35 +142,6 @@ class TimeEntryService {
   }
 
   /**
-   * Get weekly time summary for a user
-   */
-  async getUserWeeklySummary(
-    userId: string,
-    weekStartDate: string
-  ): Promise<{ totalHours: number; entriesCount: number }> {
-    const supabase = createClientSupabase();
-    if (!supabase) return { totalHours: 0, entriesCount: 0 };
-
-    const { data, error } = await supabase
-      .from('time_entries')
-      .select('hours_logged')
-      .eq('user_id', userId)
-      .eq('week_start_date', weekStartDate);
-
-    if (error) {
-      logger.error('Error fetching weekly summary', {}, error as Error);
-      return { totalHours: 0, entriesCount: 0 };
-    }
-
-    const totalHours = data.reduce((sum: number, entry: any) => sum + ((entry.hours_logged as number) || 0), 0);
-
-    return {
-      totalHours,
-      entriesCount: data.length,
-    };
-  }
-
-  /**
    * Update a time entry
    */
   async updateTimeEntry(
@@ -223,7 +153,7 @@ class TimeEntryService {
     },
     db?: any
   ): Promise<TimeEntry | null> {
-    const supabase = db ?? createClientSupabase();
+    const supabase = db;
     if (!supabase) return null;
 
     const updateData: TimeEntryUpdate = {};
@@ -260,7 +190,7 @@ class TimeEntryService {
    * Delete a time entry
    */
   async deleteTimeEntry(entryId: string, db?: any): Promise<boolean> {
-    const supabase = db ?? createClientSupabase();
+    const supabase = db;
     if (!supabase) return false;
 
     const { error } = await supabase
@@ -276,42 +206,6 @@ class TimeEntryService {
     return true;
   }
 
-  /**
-   * Get time entries for multiple weeks (for charts/trends)
-   */
-  async getUserTimeEntriesByWeek(
-    userId: string,
-    numberOfWeeks: number = 8
-  ): Promise<Record<string, number>> {
-    const supabase = createClientSupabase();
-    if (!supabase) return {};
-
-    // Calculate start date (X weeks ago)
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - (numberOfWeeks * 7));
-
-    const { data, error } = await supabase
-      .from('time_entries')
-      .select('week_start_date, hours_logged')
-      .eq('user_id', userId)
-      .gte('entry_date', startDate.toISOString().split('T')[0])
-      .lte('entry_date', endDate.toISOString().split('T')[0]);
-
-    if (error) {
-      logger.error('Error fetching time entries by week', {}, error as Error);
-      return {};
-    }
-
-    // Aggregate by week
-    const weeklyHours: Record<string, number> = {};
-    data.forEach((entry: any) => {
-      const week = entry.week_start_date as string;
-      weeklyHours[week] = (weeklyHours[week] || 0) + ((entry.hours_logged as number) || 0);
-    });
-
-    return weeklyHours;
-  }
 }
 
 // Export singleton instance

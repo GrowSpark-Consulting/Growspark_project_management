@@ -370,8 +370,18 @@ export function getPrimaryDepartment(userProfile: UserWithRoles | null): string 
  * @param supabaseClient - Supabase client (REQUIRED)
  * @returns Promise<boolean>
  */
-export async function isAccountManager(userProfile: UserWithRoles | null, supabaseClient: any): Promise<boolean> {
-  if (!userProfile || !supabaseClient) return false;
+export async function isAccountManager(userProfile: UserWithRoles | null, supabaseClient?: any): Promise<boolean> {
+  if (!userProfile) return false;
+  // In the browser (no server client) the lookup runs in /api/me/access on the server as the user
+  if (!supabaseClient && typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/me/access?check=account-manager', { credentials: 'include' });
+      return res.ok ? (await res.json())?.data === true : false;
+    } catch {
+      return false;
+    }
+  }
+  if (!supabaseClient) return false;
 
   const userId = userProfile.id;
   if (!userId) return false;

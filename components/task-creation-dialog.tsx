@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { accountService } from '@/lib/account-service';
+
 import { newProjectOptions, createProjectFromDialog, updateProjectBasics } from '@/lib/client-queries';
 
 import { useAuth } from '@/lib/hooks/useAuth';

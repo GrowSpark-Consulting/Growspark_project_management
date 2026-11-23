@@ -5,7 +5,6 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
 import { useState, useEffect } from 'react';
-import { createClientSupabase } from '@/lib/supabase';
 import {
   Building2,
   Users,
@@ -80,11 +79,9 @@ export function QuickLinks() {
   const { userProfile } = useAuth();
   const [visibleLinks, setVisibleLinks] = useState<QuickLink[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const supabase = createClientSupabase();
-
   useEffect(() => {
     async function checkPermissions() {
-      if (!userProfile || !supabase) {
+      if (!userProfile) {
         setVisibleLinks([]);
         setIsLoading(false);
         return;
@@ -112,8 +109,7 @@ export function QuickLinks() {
         const hasAccess = await hasPermission(
           userProfile as any,
           link.permission,
-          {},
-          supabase
+          {}
         );
 
         if (hasAccess) {
@@ -126,7 +122,7 @@ export function QuickLinks() {
     }
 
     checkPermissions();
-  }, [userProfile, supabase]);
+  }, [userProfile]);
 
   if (isLoading) {
     return (

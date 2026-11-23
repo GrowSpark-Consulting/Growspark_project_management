@@ -10,8 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Shield, UserPlus, UserMinus, CheckCircle, AlertCircle, ArrowLeft, Lock } from 'lucide-react'
 import { isSuperadmin } from '@/lib/rbac'
 import { isDemoMode } from '@/lib/demo-mode'
-import { assignSuperadminRoleByEmail, checkSuperadminRoleByEmail, removeSuperadminRoleByEmail } from '@/lib/superadmin-utils'
-import { testDatabaseConnection } from '@/lib/test-database'
+import { assignSuperadminRoleByEmail, checkSuperadminRoleByEmail, removeSuperadminRoleByEmail, testDatabaseConnection } from '@/lib/client-queries'
 
 interface Message {
   type: 'success' | 'error' | 'info'

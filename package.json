@@ -56,6 +56,7 @@
     "e2e:local:browser-reads": "node tests/local-e2e/browser-reads.mjs",
     "e2e:local:browser-reads-c": "node tests/local-e2e/browser-reads-c.mjs",
     "e2e:local:browser-reads-d": "node tests/local-e2e/browser-reads-d.mjs",
+    "e2e:local:browser-reads-e": "node tests/local-e2e/browser-reads-e.mjs",
     "local:fresh": "node tests/local-e2e/fresh.mjs",
     "e2e:local:build": "node tests/local-e2e/with-local-env.mjs npm run build",
     "e2e:local:start": "node tests/local-e2e/with-local-env.mjs npm start",

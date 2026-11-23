@@ -37,6 +37,16 @@ if (vars.DATABASE_URL) {
     process.exit(1);
   }
 }
+// Optional: reach Supabase through another local address, e.g. the proxy that switches the Data API off
+// (tests/local-e2e/data-api-off-proxy.mjs). Local addresses only.
+if (process.env.SUPABASE_URL_VIA) {
+  const via = new URL(process.env.SUPABASE_URL_VIA);
+  if (!['127.0.0.1', 'localhost'].includes(via.hostname)) {
+    console.error(`Refusing to run: SUPABASE_URL_VIA is not local (${via.hostname}).`);
+    process.exit(1);
+  }
+  vars.NEXT_PUBLIC_SUPABASE_URL = vars.SUPABASE_URL = via.origin;
+}
 for (const key of ['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
   if (!vars[key]) { console.error(`Refusing to run: ${key} is missing from .env.development.local.`); process.exit(1); }
 }

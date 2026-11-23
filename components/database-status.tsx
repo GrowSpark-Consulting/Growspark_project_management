@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { checkDatabaseSchema, testUserProfileCreation } from '@/lib/database-check'
+import { checkDatabaseSchema, testUserProfileCreation } from '@/lib/client-queries';
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 

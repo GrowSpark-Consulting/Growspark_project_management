@@ -1,13 +1,14 @@
+// Runs on the server as the signed-in user (POST /api/admin/diagnostics).
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { createClientSupabase } from './supabase'
 import { logger } from './debug-logger'
 
 /**
  * Test database connection and check if superadmin role exists
  */
-export async function testDatabaseConnection() {
+export async function testDatabaseConnection(db: any) {
   try {
-    const supabase = createClientSupabase()
+    const supabase = db
     if (!supabase) {
       throw new Error('Supabase not configured')
     }
