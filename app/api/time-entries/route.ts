@@ -91,10 +91,10 @@ export async function GET(request: NextRequest) {
 
     if (taskId) {
       // Get time entries for a specific task
-      timeEntries = await timeEntryService.getTaskTimeEntries(taskId);
+      timeEntries = await timeEntryService.getTaskTimeEntries(taskId, supabase);
     } else if (projectId) {
       // Get time entries for a project
-      timeEntries = await timeEntryService.getProjectTimeEntries(projectId);
+      timeEntries = await timeEntryService.getProjectTimeEntries(projectId, undefined, supabase);
     } else {
       // Get time entries for a user (default to current user)
       const targetUserId = userId ?? userProfile.id;
@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      timeEntries = await timeEntryService.getUserTimeEntries(targetUserId, startDate, endDate);
+      timeEntries = await timeEntryService.getUserTimeEntries(targetUserId, startDate, endDate, supabase);
     }
 
     return NextResponse.json({
@@ -329,7 +329,7 @@ export async function PATCH(request: NextRequest) {
       hours_logged: hoursLogged,
       entry_date: entryDate,
       description: description ?? undefined,
-    });
+    }, supabase);
 
     if (!timeEntry) {
       return NextResponse.json(
@@ -444,7 +444,7 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    const success = await timeEntryService.deleteTimeEntry(entryId);
+    const success = await timeEntryService.deleteTimeEntry(entryId, supabase);
 
     if (!success) {
       return NextResponse.json(

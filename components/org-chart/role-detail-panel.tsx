@@ -16,7 +16,8 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { RoleEditDialog } from './role-edit-dialog';
-import { roleManagementService, RoleWithDetails } from '@/lib/role-management-service';
+import { RoleWithDetails } from '@/lib/role-management-service';
+import { roleDetails as fetchRoleDetails, removeUserFromRole } from '@/lib/client-queries';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { logger, componentRender, componentError } from '@/lib/debug-logger';
 
@@ -69,10 +70,10 @@ export function RoleDetailPanel({
     try {
       componentRender('RoleDetailPanel', { action: 'loadRoleDetails', roleId: role.id as string });
 
-      const [details, users] = await Promise.all([
-        roleManagementService.getRoleById(role.id as string),
-        roleManagementService.getRoleUsers(role.id as string),
-      ]);
+      const { data: loaded, error: loadError } = await fetchRoleDetails(role.id as string);
+      if (loadError) throw loadError;
+      const details = loaded?.role ?? null;
+      const users: any[] = loaded?.users ?? [];
 
       if (details) {
         setRoleDetails(details);
@@ -129,10 +130,11 @@ export function RoleDetailPanel({
     if (!role?.id) return;
 
     try {
-      const success = await roleManagementService.removeUserFromRole(
-        (roleUsers.find((u: any) => u.user_id === userRoleId)?.user_id as string) || '',
-        role.id as string
+      const { error: removeError } = await removeUserFromRole(
+        role.id as string,
+        (roleUsers.find((u: any) => u.user_id === userRoleId)?.user_id as string) || ''
       );
+      const success = !removeError;
 
       if (success) {
         await loadRoleDetails();

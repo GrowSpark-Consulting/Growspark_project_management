@@ -180,9 +180,9 @@ class RoleManagementService {
     }
   }
 
-  async updateRole(roleId: string, updates: UpdateRoleData): Promise<Role | null> {
+  async updateRole(roleId: string, updates: UpdateRoleData, db?: SupabaseClient): Promise<Role | null> {
     try {
-      const supabase = this.getSupabase();
+      const supabase = this.getSupabase(db);
       if (!supabase) return null;
 
       // Check if role is system role (cannot be updated)
@@ -262,7 +262,7 @@ class RoleManagementService {
     }
   }
 
-  async getRoleById(roleId: string): Promise<RoleWithDetails | null> {
+  async getRoleById(roleId: string, db?: SupabaseClient): Promise<RoleWithDetails | null> {
     const startTime = Date.now();
     
     try {
@@ -271,7 +271,7 @@ class RoleManagementService {
         return null;
       }
 
-      const supabase = this.getSupabase();
+      const supabase = this.getSupabase(db);
       if (!supabase) {
         logger.error('Supabase client not available', { action: 'getRoleById', roleId });
         return null;
@@ -401,11 +401,11 @@ class RoleManagementService {
   }
 
   // Hierarchy operations
-  async getRoleHierarchy(): Promise<RoleHierarchyNode[]> {
+  async getRoleHierarchy(db?: SupabaseClient): Promise<RoleHierarchyNode[]> {
     const startTime = Date.now();
-    
+
     try {
-      const supabase = this.getSupabase();
+      const supabase = this.getSupabase(db);
       if (!supabase) {
         logger.error('Supabase client not available', { action: 'getRoleHierarchy' });
         return [];
@@ -712,9 +712,9 @@ class RoleManagementService {
     }
   }
 
-  async getRoleUsers(roleId: string): Promise<{ user_id: string; assigned_at: string; assigned_by: string; user: { id: string; name: string; email: string; image: string | null } | null }[]> {
+  async getRoleUsers(roleId: string, db?: SupabaseClient): Promise<{ user_id: string; assigned_at: string; assigned_by: string; user: { id: string; name: string; email: string; image: string | null } | null }[]> {
     try {
-      const supabase = this.getSupabase();
+      const supabase = this.getSupabase(db);
       if (!supabase) return [];
 
       const { data: userRoles, error } = await supabase

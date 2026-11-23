@@ -17,7 +17,8 @@ import { Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { PermissionEditor } from './permission-editor';
 import { Permission, getAllPermissions } from '@/lib/permissions';
-import { roleManagementService, UpdateRoleData, RoleWithDetails } from '@/lib/role-management-service';
+import { RoleWithDetails } from '@/lib/role-management-service';
+import { updateRole } from '@/lib/client-queries';
 
 interface Department {
   id: string;
@@ -110,7 +111,7 @@ export function RoleEditDialog({
     // Otherwise, save immediately to the database
     setLoading(true);
     try {
-      const updatedRole = await roleManagementService.updateRole(role.id, updateData as UpdateRoleData);
+      const { data: updatedRole } = await updateRole(role.id, updateData as Record<string, unknown>);
 
       if (updatedRole) {
         toast.success('Role updated successfully!');

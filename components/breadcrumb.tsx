@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import { ChevronRight, Home } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEffect, useState } from 'react'
-import { departmentClientService } from '@/lib/department-client-service'
+import { breadcrumbName } from '@/lib/client-queries'
 
 interface BreadcrumbItem {
   label: string
@@ -43,7 +43,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
         const departmentIds = pathSegments.filter((segment: any) => isUUID(segment))
         for (const id of departmentIds) {
           try {
-            const department = await departmentClientService.getDepartmentById(id)
+            const { data: department } = await breadcrumbName('department', id)
             if (department) {
               names.set(id, department.name)
             } else {
@@ -60,25 +60,16 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
         if (projectIndex !== -1 && projectIndex + 1 < pathSegments.length) {
           const projectId = pathSegments[projectIndex + 1]
           if (isUUID(projectId)) {
-            // Fetch project name AND account info from database
-            const { createClientSupabase } = await import('@/lib/supabase')
-            const supabase = createClientSupabase()
-            if (supabase) {
-              const { data } = await supabase
-                .from('projects')
-                .select('name, account_id, accounts(name)')
-                .eq('id', projectId)
-                .single()
-              if (data) {
-                const projectData = data as unknown as { name: string; account_id: string; accounts: { name: string } | null }
-                names.set(projectId, projectData.name)
-                // Store account info for breadcrumb replacement
-                if (projectData.account_id && projectData.accounts) {
-                  setProjectAccountInfo({
-                    accountId: projectData.account_id,
-                    accountName: projectData.accounts.name
-                  })
-                }
+            // Project name AND account info
+            const { data } = await breadcrumbName('project', projectId)
+            if (data) {
+              names.set(projectId, data.name)
+              // Store account info for breadcrumb replacement
+              if (data.accountId && data.accountName) {
+                setProjectAccountInfo({
+                  accountId: data.accountId,
+                  accountName: data.accountName
+                })
               }
             }
           }
@@ -91,19 +82,10 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
         if (accountIndex !== -1 && accountIndex + 1 < pathSegments.length) {
           const accountId = pathSegments[accountIndex + 1]
           if (isUUID(accountId)) {
-            // Fetch account name from database
-            const { createClientSupabase } = await import('@/lib/supabase')
-            const supabase = createClientSupabase()
-            if (supabase) {
-              const { data } = await supabase
-                .from('accounts')
-                .select('name')
-                .eq('id', accountId)
-                .single()
-              if (data) {
-                const accountData = data as unknown as { name: string }
-                names.set(accountId, accountData.name)
-              }
+            // Account name
+            const { data } = await breadcrumbName('account', accountId)
+            if (data) {
+              names.set(accountId, data.name)
             }
           }
         }

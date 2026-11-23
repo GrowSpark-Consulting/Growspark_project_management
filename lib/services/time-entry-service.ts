@@ -85,9 +85,10 @@ class TimeEntryService {
   async getUserTimeEntries(
     userId: string,
     startDate?: string,
-    endDate?: string
+    endDate?: string,
+    db?: any
   ): Promise<TimeEntryWithDetails[]> {
-    const supabase = createClientSupabase();
+    const supabase = db ?? createClientSupabase();
     if (!supabase) return [];
 
     let query = supabase
@@ -122,8 +123,8 @@ class TimeEntryService {
   /**
    * Get time entries for a task
    */
-  async getTaskTimeEntries(taskId: string): Promise<TimeEntryWithDetails[]> {
-    const supabase = createClientSupabase();
+  async getTaskTimeEntries(taskId: string, db?: any): Promise<TimeEntryWithDetails[]> {
+    const supabase = db ?? createClientSupabase();
     if (!supabase) return [];
 
     const { data, error } = await supabase
@@ -150,9 +151,10 @@ class TimeEntryService {
    */
   async getProjectTimeEntries(
     projectId: string,
-    weekStartDate?: string
+    weekStartDate?: string,
+    db?: any
   ): Promise<TimeEntryWithDetails[]> {
-    const supabase = createClientSupabase();
+    const supabase = db ?? createClientSupabase();
     if (!supabase) return [];
 
     let query = supabase
@@ -218,9 +220,10 @@ class TimeEntryService {
       hours_logged?: number;
       entry_date?: string;
       description?: string;
-    }
+    },
+    db?: any
   ): Promise<TimeEntry | null> {
-    const supabase = createClientSupabase();
+    const supabase = db ?? createClientSupabase();
     if (!supabase) return null;
 
     const updateData: TimeEntryUpdate = {};
@@ -256,8 +259,8 @@ class TimeEntryService {
   /**
    * Delete a time entry
    */
-  async deleteTimeEntry(entryId: string): Promise<boolean> {
-    const supabase = createClientSupabase();
+  async deleteTimeEntry(entryId: string, db?: any): Promise<boolean> {
+    const supabase = db ?? createClientSupabase();
     if (!supabase) return false;
 
     const { error } = await supabase

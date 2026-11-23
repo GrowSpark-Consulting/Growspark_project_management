@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { 
   SaveIcon
 } from 'lucide-react';
-import { createClientSupabase } from '@/lib/supabase';
+import { departmentAdminData, saveDepartment } from '@/lib/client-queries';
 
 
 interface Role {
@@ -80,20 +80,12 @@ export default function DepartmentAdminTabs({ departmentId }: DepartmentAdminTab
 
   const loadData = useCallback(async () => {
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) return;
+      const { data: loaded, error: loadError } = await departmentAdminData(departmentId);
+      if (loadError) throw loadError;
 
-      // Load roles
-      const { data: rolesData, error: rolesError } = await supabase
-        .from('roles')
-        .select(`
-          *,
-          user_roles!user_roles_role_id_fkey(count)
-        `)
-        .eq('department_id', departmentId)
-        .order('name');
-
-      if (rolesError) {
+      // Roles
+      const rolesData = loaded?.roles;
+      if (!rolesData) {
         toast.error('Failed to load department roles');
       } else {
         const rolesWithCount = (rolesData?.map((role: any) => ({
@@ -103,40 +95,17 @@ export default function DepartmentAdminTabs({ departmentId }: DepartmentAdminTab
         setRoles(rolesWithCount);
       }
 
-      // Load users
-      const { data: usersData, error: usersError } = await supabase
-        .from('user_profiles')
-        .select(`
-          id,
-          name,
-          email,
-          image,
-          user_roles!user_roles_user_id_fkey (
-            id,
-            role_id,
-            roles!user_roles_role_id_fkey (
-              id,
-              name,
-              department_id
-            )
-          )
-        `)
-        .order('name');
-
-      if (usersError) {
+      // Users
+      const usersData = loaded?.users;
+      if (!usersData) {
         toast.error('Failed to load team members');
       } else {
         setUsers(usersData || []);
       }
 
-      // Load department settings
-      const { data: departmentData, error: departmentError } = await supabase
-        .from('departments')
-        .select('*')
-        .eq('id', departmentId)
-        .single();
-
-      if (departmentError) {
+      // Department settings
+      const departmentData = loaded?.department;
+      if (!departmentData) {
         toast.error('Failed to load department settings');
       } else {
         const dept = departmentData as unknown as Record<string, unknown>;
@@ -174,17 +143,10 @@ export default function DepartmentAdminTabs({ departmentId }: DepartmentAdminTab
 
   const handleSaveSettings = async () => {
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) return;
-
-      const { error } = await (supabase as any)
-        .from('departments')
-        .update({
-          name: settingsForm.name,
-          description: settingsForm.description,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', departmentId);
+      const { error } = await saveDepartment(departmentId, {
+        name: settingsForm.name,
+        description: settingsForm.description,
+      });
 
       if (error) {
         toast.error('Failed to save settings. Please try again.');

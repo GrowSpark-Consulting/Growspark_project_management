@@ -1,4 +1,3 @@
-import { createClientSupabase } from '@/lib/supabase';
 import { logger } from '@/lib/debug-logger';
 
 export type ProjectIssue = {
@@ -30,36 +29,15 @@ export type ProjectIssueInput = {
   content: string;
 };
 
+// Issue lookups for the account and department pages, run on the server with the signed-in user's
+// client (row-level security applies): /api/accounts/[id]/issues and /api/departments/[id]/issues.
+// Single issues are read and changed through /api/projects/[projectId]/issues.
 export const projectIssuesService = {
-  /**
-   * Get all issues for a project
-   */
-  async getProjectIssues(projectId: string): Promise<ProjectIssue[]> {
-    const supabase = createClientSupabase();
-    
-    const { data, error } = await supabase
-      .from('project_issues')
-      .select(`
-        *,
-        user_profiles:created_by(id, name, email, image),
-        resolver_profiles:resolved_by(id, name, email, image)
-      `)
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      logger.error('Error fetching project issues', {}, error as Error);
-      throw error;
-    }
-
-    return data || [];
-  },
-
   /**
    * Get all active (open or in_progress) issues for a department
    */
-  async getDepartmentActiveIssues(departmentId: string): Promise<(ProjectIssue & { project?: { id: string; name: string } })[]> {
-    const supabase = createClientSupabase();
+  async getDepartmentActiveIssues(departmentId: string, db: any): Promise<(ProjectIssue & { project?: { id: string; name: string } })[]> {
+    const supabase = db;
     
     // Get all roles for this department
     const { data: departmentRoles, error: rolesError } = await supabase
@@ -163,8 +141,8 @@ export const projectIssuesService = {
   /**
    * Get all active (open or in_progress) issues for an account
    */
-  async getAccountActiveIssues(accountId: string): Promise<(ProjectIssue & { project?: { id: string; name: string } })[]> {
-    const supabase = createClientSupabase();
+  async getAccountActiveIssues(accountId: string, db: any): Promise<(ProjectIssue & { project?: { id: string; name: string } })[]> {
+    const supabase = db;
     
     // First, get all project IDs for this account
     const { data: projects, error: projectsError } = await supabase
@@ -207,132 +185,6 @@ export const projectIssuesService = {
     }));
 
     return issuesWithProjects;
-  },
-
-  /**
-   * Create a new project issue
-   */
-  async createProjectIssue(input: ProjectIssueInput): Promise<ProjectIssue> {
-    const supabase = createClientSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      throw new Error('You must be logged in to create an issue');
-    }
-
-    const { data, error } = await supabase
-      .from('project_issues')
-      .insert({
-        project_id: input.project_id,
-        content: input.content,
-        created_by: session.user.id,
-        status: 'open',
-      })
-      .select(`
-        *,
-        user_profiles:created_by(id, name, email, image)
-      `)
-      .single();
-
-    if (error) {
-      logger.error('Error creating project issue', {}, error as Error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  /**
-   * Update issue status
-   */
-  async updateIssueStatus(
-    issueId: string, 
-    status: 'open' | 'in_progress' | 'resolved'
-  ): Promise<ProjectIssue> {
-    const supabase = createClientSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      throw new Error('You must be logged in to update an issue');
-    }
-
-    const updateData: Record<string, unknown> = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-
-    // If marking as resolved, set resolved metadata
-    if (status === 'resolved') {
-      updateData.resolved_at = new Date().toISOString();
-      updateData.resolved_by = session.user.id;
-    } else {
-      // If changing from resolved to another status, clear resolved metadata
-      updateData.resolved_at = null;
-      updateData.resolved_by = null;
-    }
-
-    const { data, error } = await supabase
-      .from('project_issues')
-      .update(updateData)
-      .eq('id', issueId)
-      .select(`
-        *,
-        user_profiles:created_by(id, name, email, image),
-        resolver_profiles:resolved_by(id, name, email, image)
-      `)
-      .single();
-
-    if (error) {
-      logger.error('Error updating issue status', {}, error as Error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  /**
-   * Update issue content
-   */
-  async updateIssueContent(issueId: string, content: string): Promise<ProjectIssue> {
-    const supabase = createClientSupabase();
-
-    const { data, error } = await supabase
-      .from('project_issues')
-      .update({
-        content,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', issueId)
-      .select(`
-        *,
-        user_profiles:created_by(id, name, email, image),
-        resolver_profiles:resolved_by(id, name, email, image)
-      `)
-      .single();
-
-    if (error) {
-      logger.error('Error updating issue content', {}, error as Error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  /**
-   * Delete a project issue
-   */
-  async deleteProjectIssue(issueId: string): Promise<void> {
-    const supabase = createClientSupabase();
-
-    const { error } = await supabase
-      .from('project_issues')
-      .delete()
-      .eq('id', issueId);
-
-    if (error) {
-      logger.error('Error deleting project issue', {}, error as Error);
-      throw error;
-    }
   },
 };
 

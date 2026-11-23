@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { departmentClientService } from '@/lib/department-client-service'
+import { removeDepartment } from '@/lib/client-queries'
 import { Trash2, AlertTriangle } from 'lucide-react'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { hasPermission } from '@/lib/rbac'
@@ -57,7 +57,8 @@ export default function DepartmentDeleteDialog({
 
     setLoading(true)
     try {
-      const success = await departmentClientService.deleteDepartment(departmentId)
+      const { error } = await removeDepartment(departmentId)
+      const success = !error
       
       if (success) {
         setOpen(false)

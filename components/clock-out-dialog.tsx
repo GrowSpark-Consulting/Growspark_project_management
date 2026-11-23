@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Plus, Trash2, Clock } from 'lucide-react'
 import { toast } from 'sonner'
-import { createClientSupabase } from '@/lib/supabase'
+import { myTimeOptions, tasksOfProjects } from '@/lib/client-queries'
 import { handleApiPermissionError } from '@/lib/permission-toast'
 
 interface ClockSession {
@@ -91,30 +91,13 @@ export function ClockOutDialog({
   const loadProjects = async () => {
     setLoading(true)
     try {
-      const supabase = createClientSupabase()
-      if (!supabase) return
-
-      // Get user's assigned projects
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
       const projectMap = new Map<string, { id: string; name: string }>()
       const now = new Date()
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000) // 1 hour grace period
 
-      // 1. Get projects user is currently assigned to (active assignments)
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from('project_assignments')
-        .select(`
-          project_id,
-          projects (
-            id,
-            name,
-            status
-          )
-        `)
-        .eq('user_id', (user as any).id)
-        .is('removed_at', null)
+      // 1. The signed-in user's current project assignments (with project status)
+      const { data: options, error: assignmentsError } = await myTimeOptions()
+      const assignments = options?.assignments
 
       if (assignmentsError) {
         toast.error('Failed to load project assignments')
@@ -134,23 +117,8 @@ export function ClockOutDialog({
 
       // 2. Also check for recently completed projects the user was assigned to (within 1-hour grace period)
       // This allows logging time to projects that just completed
-      const { data: recentCompleted, error: recentError } = await supabase
-        .from('project_assignments')
-        .select(`
-          project_id,
-          projects (
-            id,
-            name,
-            status,
-            updated_at
-          )
-        `)
-        .eq('user_id', (user as any).id)
-        .is('removed_at', null) // Only check current assignments for completed projects
-
-      if (recentError) {
-        toast.error('Failed to load recent projects')
-      }
+      // (the same current assignments: their projects carry status and updated_at)
+      const recentCompleted = assignments
 
       if (recentCompleted && recentCompleted.length > 0) {
         recentCompleted.forEach((c: any) => {
@@ -179,11 +147,7 @@ export function ClockOutDialog({
         .map((p: any) => p.id)
 
       if (projectIds.length > 0) {
-        const { data: projectTasks, error: tasksError } = await supabase
-          .from('tasks')
-          .select('id, name, project_id')
-          .in('project_id', projectIds)
-          .order('name')
+        const { data: projectTasks, error: tasksError } = await tasksOfProjects(projectIds)
 
         if (tasksError) {
           toast.error('Failed to load tasks')

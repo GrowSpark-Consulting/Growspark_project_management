@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Inbox, CheckCircle2, Clock, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
-import { createClientSupabase } from '@/lib/supabase';
+import { activeWorkflowInstances } from '@/lib/client-queries';
 
 interface WorkflowProject {
   id: string;
@@ -99,21 +99,8 @@ export function UserInbox() {
     let cancelled = false;
 
     async function fetchWorkflowSteps() {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
       const projectIds = myProjects.map((p: any) => p.id);
-      const { data: workflowData, error } = await supabase
-        .from('workflow_instances')
-        .select(`
-          project_id,
-          current_node_id,
-          workflow_nodes!workflow_instances_current_node_id_fkey (
-            label
-          )
-        `)
-        .in('project_id', projectIds)
-        .eq('status', 'active');
+      const { data: workflowData, error } = await activeWorkflowInstances(projectIds);
 
       if (!cancelled && !error && workflowData) {
         const steps: { [key: string]: string | null } = {};

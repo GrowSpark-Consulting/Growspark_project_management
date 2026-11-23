@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TaskStatusBadge, PriorityBadge } from '@/components/task/task-status-badge';
 import { jsonFetcher, apiSend, apiUpload, errorMessage, formatBytes, formatDay, timeAgo } from '@/lib/client-api';
 import { TASK_ACTIONS, statusLabel, type TaskAction } from '@/lib/task-rules';
-import { createClientSupabase } from '@/lib/supabase';
+import { projectTasks } from '@/lib/client-queries';
 import {
   Play, Pause, Send, Undo2, CheckCircle2, MessageSquareWarning, RotateCcw, Paperclip, Trash2, Download,
   Reply, Pencil, Link2, X, AtSign, ListTree, History,
@@ -492,9 +492,7 @@ function DependenciesTab({ detail, refresh, openTask }: { detail: any; refresh: 
   const canEdit = detail.permissions.canEditDetails;
   useEffect(() => {
     if (!canEdit) return;
-    const supabase = createClientSupabase() as any;
-    supabase?.from('tasks').select('id, name, status').eq('project_id', detail.task.project_id).neq('id', detail.task.id).order('name')
-      .then(({ data }: any) => setOptions(data || []));
+    projectTasks(detail.task.project_id, detail.task.id).then(({ data }) => setOptions(data || []));
   }, [canEdit, detail.task.id, detail.task.project_id]);
   const existing = new Set(detail.dependencies.map((d: any) => d.id));
   const add = async () => {

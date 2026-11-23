@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { UserWithRoles } from '@/lib/rbac';
-import { createClientSupabase } from '@/lib/supabase';
+import { myTimeEntries } from '@/lib/client-queries';
 import { format, subDays, parseISO } from 'date-fns';
 import {
   BarChart,
@@ -60,21 +60,12 @@ export function TimeEntriesChart({ userProfile }: TimeEntriesChartProps) {
     const fetchChartData = async () => {
       setLoading(true);
       try {
-        const supabase = createClientSupabase() as any;
-        if (!supabase) return;
-
         const thirtyDaysAgo = subDays(new Date(), 30);
         const startDate = format(thirtyDaysAgo, 'yyyy-MM-dd');
         const endDate = format(new Date(), 'yyyy-MM-dd');
 
-        // Fetch time entries for last 30 days
-        const { data: entries } = await supabase
-          .from('time_entries')
-          .select('entry_date, hours_logged, project_id, projects(id, name)')
-          .eq('user_id', (userProfile as any).id)
-          .gte('entry_date', startDate)
-          .lte('entry_date', endDate)
-          .order('entry_date', { ascending: true });
+        // The signed-in user's entries for the last 30 days
+        const { data: entries } = await myTimeEntries({ from: startDate, to: endDate, sort: 'entry_date', order: 'asc' });
 
         if (cancelled) return;
         if (!entries) return;

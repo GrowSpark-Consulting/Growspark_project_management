@@ -23,17 +23,20 @@ import {
   Move,
   Edit
 } from 'lucide-react';
-import { AccountWithProjects, AccountMetrics, UrgentItem, ProjectWithDetails, accountService } from '@/lib/account-service';
-import { createClientSupabase } from '@/lib/supabase';
+import { AccountWithProjects, AccountMetrics, UrgentItem, ProjectWithDetails } from '@/lib/account-service';
+import {
+  taskHoursOfProjects, timelineMilestones, addTimelineMilestone, accountIssues, finishedAccountProjects,
+  accountKanbanColumns, setProjectStatus, deleteProject,
+} from '@/lib/client-queries';
 
 import TaskCreationDialog from '@/components/task-creation-dialog';
 import { format, formatDistance } from 'date-fns';
 import { accountKanbanConfigService, KanbanColumn } from '@/lib/account-kanban-config';
 import { UserWithRoles, hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
-import { getMilestones, createMilestone, type Milestone } from '@/lib/milestone-service';
+import { type Milestone } from '@/lib/milestone-service';
 import { MilestoneDialog } from '@/components/milestone-dialog';
-import { projectIssuesService, type ProjectIssue } from '@/lib/project-issues-service';
+import { type ProjectIssue } from '@/lib/project-issues-service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
@@ -170,14 +173,8 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
 
     const fetchRemainingHours = async () => {
       try {
-        const supabase = createClientSupabase() as any;
-        if (!supabase) return;
-
         const ids = projectIds.split(',');
-        const { data: tasksData } = await supabase
-          .from('tasks')
-          .select('project_id, remaining_hours, estimated_hours')
-          .in('project_id', ids);
+        const { data: tasksData } = await taskHoursOfProjects(ids);
 
         if (tasksData) {
           const hoursData: Record<string, { remaining: number | null; taskSum: number }> = {};
@@ -219,8 +216,8 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   // Load milestones from database
   const loadMilestones = useCallback(async () => {
       try {
-        const fetchedMilestones = await getMilestones();
-        setMilestones(fetchedMilestones);
+        const { data: fetchedMilestones, error } = await timelineMilestones();
+        if (!error) setMilestones(fetchedMilestones || []);
       } catch {
         // Silently handle milestone loading errors
       }
@@ -234,8 +231,8 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   const loadActiveIssues = useCallback(async () => {
       setLoadingActiveIssues(true);
       try {
-        const issues = await projectIssuesService.getAccountActiveIssues(accountId);
-        setActiveIssues(issues);
+        const { data: issues, error } = await accountIssues(accountId);
+        if (!error) setActiveIssues(issues || []);
       } catch {
         // Silently handle active issues load errors
       } finally {
@@ -251,18 +248,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   const loadFinishedProjects = useCallback(async () => {
       setLoadingFinishedProjects(true);
       try {
-        const supabase = createClientSupabase() as any;
-        if (!supabase) return;
-
-        const { data, error } = await supabase
-          .from('projects')
-          .select(`
-            *,
-            account:accounts(id, name)
-          `)
-          .eq('account_id', accountId)
-          .eq('status', 'complete')
-          .order('updated_at', { ascending: false });
+        const { data, error } = await finishedAccountProjects(accountId);
 
         if (error) {
           return;
@@ -307,8 +293,8 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
 
       if (response.ok) {
         // Reload active issues (will automatically filter out resolved ones)
-        const issues = await projectIssuesService.getAccountActiveIssues(accountId);
-        setActiveIssues(issues);
+        const { data: issues } = await accountIssues(accountId);
+        setActiveIssues(issues || []);
         toast.success(`Issue ${newStatus === 'resolved' ? 'resolved' : 'status updated'}`);
       } else {
         // Revert on error
@@ -325,8 +311,9 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   // Load account-specific kanban configuration
   const loadKanbanConfig = useCallback(async () => {
       try {
-        const config = await accountKanbanConfigService.getOrCreateAccountKanbanConfig(accountId);
-        setKanbanColumns(config.columns.sort((a, b) => a.order - b.order));
+        // Saved columns, or the defaults when the account has none saved yet (saving creates them)
+        const { data: columns } = await accountKanbanColumns(accountId);
+        setKanbanColumns(columns?.length ? [...columns].sort((a: KanbanColumn, b: KanbanColumn) => a.order - b.order) : DEFAULT_KANBAN_COLUMNS);
       } catch {
         setKanbanColumns(DEFAULT_KANBAN_COLUMNS);
       }
@@ -450,13 +437,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
       } else {
         // For standard columns, update the database status
 
-        const supabase = createClientSupabase() as any;
-        if (!supabase) return;
-
-        const { error } = await (supabase as any)
-          .from('projects')
-          .update({ status: newStatus })
-          .eq('id', projectId);
+        const { error } = await setProjectStatus(projectId, newStatus);
 
         if (error) {
           return;
@@ -493,9 +474,9 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
     if (!projectToDelete) return;
 
     try {
-      const success = await accountService.deleteProject(projectToDelete.id);
+      const { error } = await deleteProject(projectToDelete.id);
 
-      if (success) {
+      if (!error) {
         // Remove from active projects
         setProjects(prev => prev.filter((p: any) => p.id !== projectToDelete.id));
         // Also remove from finished projects
@@ -538,12 +519,13 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
     date: Date;
     color: string;
   }) => {
-    const newMilestone = await createMilestone({
+    const { data: newMilestone, error } = await addTimelineMilestone({
       name: data.name,
       description: data.description,
-      date: data.date,
+      date: data.date.toISOString(),
       color: data.color,
     });
+    if (error || !newMilestone) throw new Error('Failed to create milestone');
     const updatedMilestones = [...milestones, newMilestone].sort((a, b) =>
       new Date(a.date).getTime() - new Date(b.date).getTime()
     );

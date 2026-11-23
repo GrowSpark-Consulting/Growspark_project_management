@@ -13,7 +13,7 @@ import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority } fr
 import { hasPermission, canViewProject, UserWithRoles } from '@/lib/rbac'
 import { Permission } from '@/lib/permissions'
 import { useProjects } from '@/lib/hooks/use-data'
-import { createClientSupabase } from '@/lib/supabase'
+import { activeWorkflowInstances } from '@/lib/client-queries'
 
 interface ProjectWithDetails {
   id: string;
@@ -125,21 +125,8 @@ export function AssignedProjectsSection({ userProfile }: AssignedProjectsSection
     let cancelled = false
 
     async function fetchWorkflowSteps() {
-      const supabase = createClientSupabase()
-      if (!supabase) return
-
       const projectIds = visibleProjects.map((p: any) => p.id)
-      const { data: workflowData, error } = await supabase
-        .from('workflow_instances')
-        .select(`
-          project_id,
-          current_node_id,
-          workflow_nodes!workflow_instances_current_node_id_fkey (
-            label
-          )
-        `)
-        .in('project_id', projectIds)
-        .eq('status', 'active')
+      const { data: workflowData, error } = await activeWorkflowInstances(projectIds)
 
       if (!cancelled && !error && workflowData) {
         const steps: { [key: string]: string | null } = {}

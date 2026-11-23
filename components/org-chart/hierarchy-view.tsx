@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChevronRight, ChevronDown, Users, Shield } from 'lucide-react';
 import { RoleHierarchyNode } from '@/lib/role-management-service';
-import { organizationService } from '@/lib/organization-service';
+import { orgChart } from '@/lib/client-queries';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { logger, componentError } from '@/lib/debug-logger';
 
@@ -66,7 +66,7 @@ function TreeNode({
         roleId: node.id 
       });
       
-      const users = await organizationService.getUsersByRole(node.id);
+      const users: any[] = (await orgChart('role-users', node.id)).data || [];
       setRoleUsers(users as unknown as Record<string, unknown>[]);
       
       logger.debug('Role users loaded successfully', { 
@@ -299,7 +299,7 @@ export function HierarchyView({
   const loadHierarchy = async () => {
     try {
       setLoading(true);
-      const hierarchyData = await organizationService.getHierarchyView();
+      const hierarchyData = (await orgChart('hierarchy')).data;
       if (hierarchyData) {
         setHierarchy(hierarchyData.nodes);
         // Auto-expand first level

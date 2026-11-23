@@ -21,7 +21,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority } from '@/components/project-data-table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { createClientSupabase } from '@/lib/supabase';
+import { activeWorkflowInstances, deleteProject } from '@/lib/client-queries';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { useProjects } from '@/lib/hooks/use-data';
@@ -235,16 +235,8 @@ export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionPr
     try {
       setDeletingProject(true);
 
-      const supabase = createClientSupabase() as any;
-      if (!supabase) {
-        throw new Error('Failed to create Supabase client');
-      }
-
-      // Delete the project
-      const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', projectToDelete.id);
+      // Delete the project (the API checks the project-manager permission)
+      const { error } = await deleteProject(projectToDelete.id);
 
       if (error) {
         throw error;
@@ -324,24 +316,10 @@ export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionPr
     }
 
     async function fetchWorkflowSteps() {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
       const projectIds = visibleProjects.map((p: any) => p.id);
 
-      // Fetch workflow instances - try to get both snapshot and live node data
-      const { data: workflowData, error } = await supabase
-        .from('workflow_instances')
-        .select(`
-          project_id,
-          current_node_id,
-          started_snapshot,
-          workflow_nodes:workflow_nodes!workflow_instances_current_node_id_fkey (
-            label
-          )
-        `)
-        .in('project_id', projectIds)
-        .eq('status', 'active');
+      // Workflow runs with both the snapshot and the live node data
+      const { data: workflowData, error } = await activeWorkflowInstances(projectIds);
 
       if (!error && workflowData) {
         const steps: { [key: string]: string | null } = {};

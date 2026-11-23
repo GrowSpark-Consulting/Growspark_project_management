@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/lib/hooks/useAuth'
-import { createClientSupabase } from '@/lib/supabase'
+import { timeTrackingFilters } from '@/lib/client-queries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -76,17 +76,9 @@ export default function AdminTimeTrackingPage() {
 
   const loadUsers = useCallback(async () => {
     try {
-      const supabase = createClientSupabase() as any
-      if (!supabase) {
-        return
-      }
-
-      const { data, error } = await (supabase as any)
-        .from('user_profiles')
-        .select('id, name')
-        .order('name')
-
-      if (error) {
+      const { data: filters, error } = await timeTrackingFilters()
+      const data = filters?.users
+      if (error || !data) {
         return
       }
 
@@ -100,17 +92,9 @@ export default function AdminTimeTrackingPage() {
 
   const loadProjects = useCallback(async () => {
     try {
-      const supabase = createClientSupabase() as any
-      if (!supabase) {
-        return
-      }
-
-      const { data, error } = await (supabase as any)
-        .from('projects')
-        .select('id, name')
-        .order('name')
-
-      if (error) {
+      const { data: filters, error } = await timeTrackingFilters()
+      const data = filters?.projects
+      if (error || !data) {
         return
       }
 

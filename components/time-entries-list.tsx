@@ -43,7 +43,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Clock, Edit, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { UserWithRoles } from '@/lib/rbac';
-import { createClientSupabase } from '@/lib/supabase';
+import { myTimeEntries, myTimeEntryFilters } from '@/lib/client-queries';
 import { format, subDays, differenceInDays, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -112,15 +112,9 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
 
   const fetchFiltersData = useCallback(async () => {
     try {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // Fetch distinct projects
-      const { data: projectsData } = await supabase
-        .from('time_entries')
-        .select('project_id, projects(id, name)')
-        .eq('user_id', (userProfile as any).id)
-        .not('project_id', 'is', null);
+      // Projects and tasks the user has logged time on
+      const { data: filterData } = await myTimeEntryFilters();
+      const projectsData = filterData?.projects;
 
       const uniqueProjects = Array.from(
         new Map(
@@ -132,12 +126,7 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
 
       setProjects(uniqueProjects as Array<{ id: string; name: string }>);
 
-      // Fetch distinct tasks
-      const { data: tasksData } = await supabase
-        .from('time_entries')
-        .select('task_id, tasks(id, name)')
-        .eq('user_id', (userProfile as any).id)
-        .not('task_id', 'is', null);
+      const tasksData = filterData?.tasks;
 
       const uniqueTasks = Array.from(
         new Map(
@@ -154,39 +143,22 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
   }, [userProfile]);
 
   const fetchEntries = useCallback(async () => {
-    const userId = (userProfile as any).id;
     setLoading(true);
     try {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
       const offset = (currentPage - 1) * ENTRIES_PER_PAGE;
-
-      // Build query
-      let query = supabase
-        .from('time_entries')
-        .select('*, tasks(id, name), projects(id, name)', { count: 'exact' })
-        .eq('user_id', userId)
-        .gte('entry_date', startDate)
-        .lte('entry_date', endDate);
-
-      // Apply filters
-      if (projectFilter !== 'all') {
-        query = query.eq('project_id', projectFilter);
-      }
-
-      if (taskFilter !== 'all') {
-        query = query.eq('task_id', taskFilter);
-      }
-
-      // Apply sorting
       const sortColumn = sortBy === 'date' ? 'entry_date' : sortBy === 'hours' ? 'hours_logged' : 'project_id';
-      query = query.order(sortColumn, { ascending: sortOrder === 'asc' });
 
-      // Apply pagination
-      query = query.range(offset, offset + ENTRIES_PER_PAGE - 1);
-
-      const { data, error, count } = await query;
+      // The signed-in user's entries, filtered, sorted and paged by the API
+      const { data, error, count } = await myTimeEntries({
+        from: startDate,
+        to: endDate,
+        projectId: projectFilter !== 'all' ? projectFilter : undefined,
+        taskId: taskFilter !== 'all' ? taskFilter : undefined,
+        sort: sortColumn,
+        order: sortOrder === 'asc' ? 'asc' : 'desc',
+        offset,
+        limit: ENTRIES_PER_PAGE,
+      });
 
       if (error) {
         toast.error('Failed to load time entries');

@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Clock, Calendar, TrendingUp, BarChart3 } from 'lucide-react';
 import { UserWithRoles } from '@/lib/rbac';
-import { createClientSupabase } from '@/lib/supabase';
+import { myTimeEntrySummary } from '@/lib/client-queries';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays } from 'date-fns';
 
 interface TimeEntriesSummaryProps {
@@ -33,9 +33,6 @@ export function TimeEntriesSummary({ userProfile }: TimeEntriesSummaryProps) {
   const fetchSummaryStats = useCallback(async () => {
     setLoading(true);
     try {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
       const now = new Date();
       const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday
       const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
@@ -43,32 +40,27 @@ export function TimeEntriesSummary({ userProfile }: TimeEntriesSummaryProps) {
       const monthEnd = endOfMonth(now);
       const last30DaysStart = subDays(now, 30);
 
-      // Fetch this week's hours
-      const { data: weekData } = await supabase
-        .from('time_entries')
-        .select('hours_logged')
-        .eq('user_id', userId)
-        .gte('entry_date', format(weekStart, 'yyyy-MM-dd'))
-        .lte('entry_date', format(weekEnd, 'yyyy-MM-dd'));
+      // The rows behind the cards; the dates come from the user's own time zone
+      const { data: summary } = await myTimeEntrySummary({
+        weekFrom: format(weekStart, 'yyyy-MM-dd'),
+        weekTo: format(weekEnd, 'yyyy-MM-dd'),
+        monthFrom: format(monthStart, 'yyyy-MM-dd'),
+        monthTo: format(monthEnd, 'yyyy-MM-dd'),
+        since: format(last30DaysStart, 'yyyy-MM-dd'),
+      });
+
+      // This week's hours
+      const weekData = summary?.week;
 
       const hoursThisWeek = weekData?.reduce((sum: number, entry: { hours_logged: number }) => sum + (entry.hours_logged || 0), 0) || 0;
 
-      // Fetch this month's hours
-      const { data: monthData } = await supabase
-        .from('time_entries')
-        .select('hours_logged')
-        .eq('user_id', userId)
-        .gte('entry_date', format(monthStart, 'yyyy-MM-dd'))
-        .lte('entry_date', format(monthEnd, 'yyyy-MM-dd'));
+      // This month's hours
+      const monthData = summary?.month;
 
       const hoursThisMonth = monthData?.reduce((sum: number, entry: { hours_logged: number }) => sum + (entry.hours_logged || 0), 0) || 0;
 
-      // Fetch last 30 days for average calculation
-      const { data: last30DaysData } = await supabase
-        .from('time_entries')
-        .select('hours_logged, entry_date')
-        .eq('user_id', userId)
-        .gte('entry_date', format(last30DaysStart, 'yyyy-MM-dd'));
+      // Last 30 days for the average
+      const last30DaysData = summary?.recent;
 
       // Calculate average hours per day (only counting days with entries)
       const uniqueDays = new Set(last30DaysData?.map((entry: { entry_date: string }) => entry.entry_date) || []);
@@ -76,10 +68,7 @@ export function TimeEntriesSummary({ userProfile }: TimeEntriesSummaryProps) {
       const averageHoursPerDay = uniqueDays.size > 0 ? totalHours / uniqueDays.size : 0;
 
       // Total entries count
-      const { count } = await supabase
-        .from('time_entries')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId);
+      const count = summary?.count;
 
       setStats({
         hoursThisWeek,

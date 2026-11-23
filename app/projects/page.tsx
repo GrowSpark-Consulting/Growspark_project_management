@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { RoleGuard } from '@/components/role-guard'
-import { createClientSupabase } from '@/lib/supabase'
+import { projectsList, deleteProject } from '@/lib/client-queries'
 import { FolderOpen, Plus } from 'lucide-react'
 import ProjectCreationDialog from '@/components/project-creation-dialog'
 import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority } from '@/components/project-data-table'
@@ -102,236 +102,10 @@ export default function ProjectsPage() {
 
       try {
         setLoading(true)
-        const supabase = createClientSupabase()
-        if (!supabase) {
-          throw new Error('Failed to create Supabase client')
-        }
-
-        // Get projects where user has access:
-        // 1. Superadmins see all projects
-        // 2. Projects they created
-        // 3. Projects they're directly assigned to (assigned_user_id)
-        // 4. Projects they're in via project_assignments
-        // 5. Projects where they have tasks assigned
-
-        // Check if user is superadmin (bypasses all permission checks)
-        const userIsSuperadmin = isSuperadmin(userProfile)
-
-        // Check if user has VIEW_ALL_PROJECTS permission using proper permission check
-        const hasViewAllProjects = userIsSuperadmin || await hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS)
-
-        // First, get projects the user created or is directly assigned to
-        let projectIds: string[] = []
-
-        // Only need to gather project IDs if user doesn't have VIEW_ALL_PROJECTS
-        if (!hasViewAllProjects) {
-          // Get projects created by user or assigned to user
-          const { data: directProjects } = await supabase
-            .from('projects')
-            .select('id')
-            .or(`created_by.eq.${(userProfile as any).id},assigned_user_id.eq.${(userProfile as any).id}`)
-
-          if (directProjects) {
-            projectIds.push(...directProjects.map((p: { id: string }) => p.id))
-          }
-
-          // Get projects via project_assignments
-          const { data: assignedProjects } = await supabase
-            .from('project_assignments')
-            .select('project_id')
-            .eq('user_id', (userProfile as any).id)
-            .is('removed_at', null)
-
-          if (assignedProjects) {
-            projectIds.push(...assignedProjects.map((p: { project_id: string }) => p.project_id))
-          }
-
-          // Get projects where user has tasks
-          const { data: taskProjects } = await supabase
-            .from('tasks')
-            .select('project_id')
-            .eq('assigned_to', (userProfile as any).id)
-
-          if (taskProjects) {
-            projectIds.push(...taskProjects.map((t: { project_id: string }) => t.project_id))
-          }
-
-          // Remove duplicates
-          projectIds = Array.from(new Set(projectIds))
-        }
-
-        // Build query
-        let query = supabase
-          .from('projects')
-          .select(`
-            *,
-            account:accounts(*)
-          `)
-
-        // Filter by accessible projects unless user has VIEW_ALL_PROJECTS or is superadmin
-        if (!hasViewAllProjects && projectIds.length > 0) {
-          query = query.in('id', projectIds)
-        } else if (!hasViewAllProjects && projectIds.length === 0) {
-          // No accessible projects
-          query = query.eq('id', '00000000-0000-0000-0000-000000000000')
-        }
-
-        // Exclude completed projects - they go to "Finished Projects" on account page
-        query = query.neq('status', 'complete')
-        // Exclude archived projects (read-only; reachable from the Manager portal reports)
-        query = query.is('archived_at', null)
-
-        const { data, error: queryError } = await query
-
-        if (queryError) {
-          throw queryError
-        }
-
-        // Get departments for each project via project_assignments
-        const fetchedProjectIds = (data || []).map((p: any) => p.id)
-        const departmentsByProject: { [key: string]: Record<string, unknown>[] } = {}
-
-        if (fetchedProjectIds.length > 0) {
-          // First, get all project assignments to get user_ids
-          const { data: assignments } = await supabase
-            .from('project_assignments')
-            .select('project_id, user_id')
-            .in('project_id', fetchedProjectIds)
-            .is('removed_at', null)
-
-          if (assignments && assignments.length > 0) {
-            // Get unique user IDs
-            const userIds = Array.from(new Set(assignments.map((a: any) => a.user_id)))
-
-            // Get user roles with department info for these users
-            const { data: userRoles } = await supabase
-              .from('user_roles')
-              .select(`
-                user_id,
-                roles!user_roles_role_id_fkey (
-                  department_id,
-                  departments!roles_department_id_fkey (
-                    id,
-                    name
-                  )
-                )
-              `)
-              .in('user_id', userIds)
-
-            // Build a map of user_id to departments
-            const userDepartments: { [key: string]: Record<string, unknown>[] } = {}
-            if (userRoles) {
-              userRoles.forEach((ur: any) => {
-                const userId = ur.user_id as string
-                if (!userDepartments[userId]) {
-                  userDepartments[userId] = []
-                }
-                const role = ur.roles as Record<string, unknown> | undefined
-                if (role && role.departments) {
-                  const dept = role.departments as Record<string, unknown>
-                  const exists = userDepartments[userId].some((d: any) => d.id === dept.id)
-                  if (!exists) {
-                    userDepartments[userId].push(dept)
-                  }
-                }
-              })
-            }
-
-            // Map departments to projects based on assigned users
-            assignments.forEach((assignment: any) => {
-              const projectId = assignment.project_id as string
-              const userId = assignment.user_id as string
-
-              if (!departmentsByProject[projectId]) {
-                departmentsByProject[projectId] = []
-              }
-
-              const depts = userDepartments[userId] || []
-              depts.forEach((dept: any) => {
-                const exists = departmentsByProject[projectId].some((d: any) => d.id === dept.id)
-                if (!exists) {
-                  departmentsByProject[projectId].push(dept)
-                }
-              })
-            })
-          }
-        }
-
-        // Get workflow step info for each project
-        const workflowSteps: { [key: string]: string | null } = {}
-        if (fetchedProjectIds.length > 0) {
-          const { data: workflowData } = await supabase
-            .from('workflow_instances')
-            .select(`
-              project_id,
-              current_node_id,
-              workflow_nodes!workflow_instances_current_node_id_fkey (
-                label
-              )
-            `)
-            .in('project_id', fetchedProjectIds)
-            .eq('status', 'active')
-
-          if (workflowData) {
-            workflowData.forEach((wi: any) => {
-              const projectId = wi.project_id as string
-              if (projectId) {
-                const workflowNode = wi.workflow_nodes as Record<string, unknown> | undefined
-                workflowSteps[projectId] = (workflowNode?.label as string) || null
-              }
-            })
-          }
-        }
-
-        // Get assigned users for each project
-        const assignedUsersByProject: { [key: string]: AssignedUserData[] } = {}
-        if (fetchedProjectIds.length > 0) {
-          const { data: projectAssignments } = await supabase
-            .from('project_assignments')
-            .select(`
-              project_id,
-              user_profiles!project_assignments_user_id_fkey (
-                id,
-                name,
-                email,
-                image
-              )
-            `)
-            .in('project_id', fetchedProjectIds)
-            .is('removed_at', null)
-
-          if (projectAssignments) {
-            projectAssignments.forEach((pa: any) => {
-              const projectId = pa.project_id as string
-              if (!assignedUsersByProject[projectId]) {
-                assignedUsersByProject[projectId] = []
-              }
-              if (pa.user_profiles) {
-                const user = pa.user_profiles as any
-                // Avoid duplicates
-                if (!assignedUsersByProject[projectId].some(u => u.id === user.id)) {
-                  assignedUsersByProject[projectId].push({
-                    id: user.id,
-                    name: user.name || 'Unknown',
-                    email: user.email,
-                    image: user.image
-                  })
-                }
-              }
-            })
-          }
-        }
-
-        // Transform the data to include departments, workflow step, and assigned users
-        const projectsWithDetails: ProjectWithDetails[] = (data || []).map((project: any) => {
-          const projectId = project.id as string
-          return {
-            ...project,
-            departments: departmentsByProject[projectId] || [],
-            workflow_step: workflowSteps[projectId] || null,
-            assigned_users: assignedUsersByProject[projectId] || []
-          } as unknown as ProjectWithDetails
-        })
+        // Projects the user can see, with departments, workflow step and team (runs on the server as the user)
+        const { data: list, error: listError } = await projectsList()
+        if (listError) throw listError
+        const projectsWithDetails = (list || []) as unknown as ProjectWithDetails[]
 
         if (cancelled) return
 
@@ -456,16 +230,8 @@ export default function ProjectsPage() {
         return
       }
 
-      const supabase = createClientSupabase()
-      if (!supabase) {
-        throw new Error('Failed to create Supabase client')
-      }
-
-      // Delete the project
-      const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', projectToDelete.id)
+      // Delete the project (the API checks the permission again)
+      const { error } = await deleteProject(projectToDelete.id)
 
       if (error) {
         throw error

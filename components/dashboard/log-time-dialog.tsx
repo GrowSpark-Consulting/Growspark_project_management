@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { createClientSupabase } from '@/lib/supabase';
+import { myTimeOptions, tasksOfProjects } from '@/lib/client-queries';
 import {
   Dialog,
   DialogContent,
@@ -56,21 +56,16 @@ export function LogTimeDialog({ open, onOpenChange, onSuccess }: LogTimeDialogPr
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const supabase = createClientSupabase();
-
   // Load user's assigned projects
   useEffect(() => {
     async function loadProjects() {
-      if (!userProfile || !supabase || !open) return;
+      if (!userProfile || !open) return;
 
       setIsLoadingProjects(true);
       try {
-        // Get projects user is assigned to
-        const { data: assignments, error: assignmentError } = await supabase
-          .from('project_assignments')
-          .select('project_id, projects(id, name)')
-          .eq('user_id', (userProfile as any).id)
-          .is('removed_at', null);
+        // Projects the user is assigned to, and the projects of tasks assigned to them
+        const { data: options, error: assignmentError } = await myTimeOptions();
+        const assignments = options?.assignments;
 
         if (assignmentError) {
           toast.error('Failed to load projects');
@@ -88,13 +83,10 @@ export function LogTimeDialog({ open, onOpenChange, onSuccess }: LogTimeDialogPr
           }
         });
 
-        // Also check tasks assigned to user for projects
-        const { data: taskAssignments, error: taskError } = await supabase
-          .from('tasks')
-          .select('project_id, projects(id, name)')
-          .eq('assigned_to', (userProfile as any).id);
+        // Also the projects of tasks assigned to the user
+        const taskAssignments = options?.taskProjects;
 
-        if (!taskError && taskAssignments) {
+        if (taskAssignments) {
           taskAssignments.forEach((t: any) => {
             if (t.projects) {
               const projectData = Array.isArray(t.projects) ? t.projects[0] : t.projects;
@@ -112,12 +104,12 @@ export function LogTimeDialog({ open, onOpenChange, onSuccess }: LogTimeDialogPr
     }
 
     loadProjects();
-  }, [userProfile, supabase, open]);
+  }, [userProfile, open]);
 
   // Load tasks when project changes
   useEffect(() => {
     async function loadTasks() {
-      if (!selectedProjectId || !supabase) {
+      if (!selectedProjectId) {
         setTasks([]);
         setSelectedTaskId('');
         return;
@@ -125,12 +117,7 @@ export function LogTimeDialog({ open, onOpenChange, onSuccess }: LogTimeDialogPr
 
       setIsLoadingTasks(true);
       try {
-        const { data, error } = await supabase
-          .from('tasks')
-          .select('id, name, project_id')
-          .eq('project_id', selectedProjectId)
-          .neq('status', 'done')
-          .order('name');
+        const { data, error } = await tasksOfProjects([selectedProjectId], true);
 
         if (error) {
           toast.error('Failed to load tasks');
@@ -145,7 +132,7 @@ export function LogTimeDialog({ open, onOpenChange, onSuccess }: LogTimeDialogPr
     }
 
     loadTasks();
-  }, [selectedProjectId, supabase]);
+  }, [selectedProjectId]);
 
   // Reset form when dialog closes
   useEffect(() => {

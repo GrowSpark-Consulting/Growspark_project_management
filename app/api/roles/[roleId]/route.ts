@@ -6,6 +6,7 @@ import { Permission } from '@/lib/permissions';
 import { createApiSupabaseClient } from '@/lib/supabase-server';
 import { checkDemoModeForDestructiveAction } from '@/lib/api-demo-guard';
 import { isValidUUID } from '@/lib/validation-helpers';
+import { api, ok, assertUuid } from '@/lib/api/context';
 
 export async function DELETE(
   request: NextRequest,
@@ -374,7 +375,29 @@ export async function PATCH(
     logger.info('Role update request body', { action: 'updateRole', roleId, body });
 
     // Use roleManagementService to update the role
-    const updatedRole = await roleManagementService.updateRole(roleId, body);
+    // Only the editable fields (UpdateRoleData); runs as the signed-in user, so row-level security applies
+    const updates: Record<string, unknown> = {};
+    for (const key of ['name', 'description', 'permissions', 'reporting_role_id', 'hierarchy_level'] as const) {
+      if (body[key] !== undefined) updates[key] = key === 'name' ? String(body.name).trim() : body[key];
+    }
+    if (updates.permissions !== undefined && (typeof updates.permissions !== 'object' || updates.permissions === null || Array.isArray(updates.permissions))) {
+      return NextResponse.json({ error: 'Permissions must be an object' }, { status: 400 });
+    }
+    if (updates.reporting_role_id !== undefined && updates.reporting_role_id !== null && !isValidUUID(String(updates.reporting_role_id))) {
+      return NextResponse.json({ error: 'Invalid reporting role' }, { status: 400 });
+    }
+    if (updates.hierarchy_level !== undefined && !(Number.isInteger(updates.hierarchy_level) && (updates.hierarchy_level as number) >= 0 && (updates.hierarchy_level as number) <= 100)) {
+      return NextResponse.json({ error: 'Hierarchy level must be a whole number from 0 to 100' }, { status: 400 });
+    }
+    if (!Object.keys(updates).length) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+    }
+    const supabase = createApiSupabaseClient(request);
+    if (!supabase) {
+      return NextResponse.json({ error: 'Database connection failed' }, { status: 500 });
+    }
+
+    const updatedRole = await roleManagementService.updateRole(roleId, updates, supabase as any);
 
     if (!updatedRole) {
       logger.error('Failed to update role', { action: 'updateRole', roleId });
@@ -398,3 +421,18 @@ export async function PATCH(
     return handleGuardError(error);
   }
 }
+
+/**
+ * GET /api/roles/[roleId]: the role with its department and reporting role, and its people, for the
+ * org chart's role panel (moved off browser queries). Runs as the signed-in user, so row-level
+ * security applies.
+ */
+export const GET = api<{ roleId: string }>(async (_request, ctx, params) => {
+  const roleId = assertUuid(params.roleId, 'role id');
+  const [role, users] = await Promise.all([
+    roleManagementService.getRoleById(roleId, ctx.supabase),
+    roleManagementService.getRoleUsers(roleId, ctx.supabase),
+  ]);
+  // role is null when the lookup fails (as it did in the browser); the panel still shows the people
+  return ok({ role, users });
+});

@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PlusIcon } from 'lucide-react';
-import { createClientSupabase } from '@/lib/supabase';
+import { createDepartmentRole, updateDepartmentRole } from '@/lib/client-queries';
 
 
 interface Role {
@@ -102,30 +102,11 @@ export default function DepartmentRoleDialog({
     setLoading(true);
 
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        throw new Error('Failed to create Supabase client');
-      }
-
-      // Check current user and their permissions
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) {
-        toast.error('Authentication error. Please log in again.');
-        return;
-      }
-
       if (mode === 'create') {
-        const insertData = {
+        const { data, error } = await createDepartmentRole(departmentId, {
           name: formData.name,
-          department_id: departmentId,
           permissions: formData.permissions,
-        };
-        
-        const { data, error } = await (supabase as any)
-          .from('roles')
-          .insert(insertData)
-          .select()
-          .single();
+        });
 
         if (error) {
           toast.error('Failed to create role. Please try again.');
@@ -134,17 +115,11 @@ export default function DepartmentRoleDialog({
 
         onRoleCreated?.(data);
       } else if (mode === 'edit' && existingRole) {
-        const updateData = {
+        const { data, error } = await updateDepartmentRole(departmentId, {
+          roleId: existingRole.id,
           name: formData.name,
           permissions: formData.permissions,
-        };
-        
-        const { data, error } = await (supabase as any)
-          .from('roles')
-          .update(updateData)
-          .eq('id', existingRole.id)
-          .select()
-          .single();
+        });
 
         if (error) {
           toast.error('Failed to update role. Please try again.');

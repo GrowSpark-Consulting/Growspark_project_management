@@ -70,16 +70,17 @@ export interface HierarchyView {
 }
 
 class OrganizationService {
-  private async getSupabase() {
-    return createClientSupabase();
+  // db: the signed-in user's client when run on the server (the org chart calls /api/org-structure/chart)
+  private async getSupabase(db?: any) {
+    return db ?? createClientSupabase();
   }
 
   // Get complete organization structure
-  async getOrganizationStructure(): Promise<OrganizationStructure | null> {
+  async getOrganizationStructure(db?: any): Promise<OrganizationStructure | null> {
     const startTime = Date.now();
     
     try {
-      const supabase = await this.getSupabase();
+      const supabase = await this.getSupabase(db);
       if (!supabase) {
         logger.error('Supabase client not available', { action: 'getOrganizationStructure' });
         return null;
@@ -114,7 +115,7 @@ class OrganizationService {
       }
 
       // Get hierarchy view
-      const hierarchy = await roleManagementService.getRoleHierarchy();
+      const hierarchy = await roleManagementService.getRoleHierarchy(db);
 
       // Get roles for each department separately
       const processedDepartments: DepartmentWithRoles[] = [];
@@ -212,9 +213,9 @@ class OrganizationService {
   }
 
   // Get hierarchy view (tree structure)
-  async getHierarchyView(): Promise<HierarchyView | null> {
+  async getHierarchyView(db?: any): Promise<HierarchyView | null> {
     try {
-      const hierarchy = await roleManagementService.getRoleHierarchy();
+      const hierarchy = await roleManagementService.getRoleHierarchy(db);
       
       if (!hierarchy) return null;
 
@@ -304,9 +305,9 @@ class OrganizationService {
   }
 
   // Get users by role
-  async getUsersByRole(roleId: string): Promise<User[]> {
+  async getUsersByRole(roleId: string, db?: any): Promise<User[]> {
     try {
-      const supabase = await this.getSupabase();
+      const supabase = await this.getSupabase(db);
       if (!supabase) return [];
 
       const { data: userRoles, error } = await supabase

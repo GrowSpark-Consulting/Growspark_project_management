@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PlusIcon } from 'lucide-react';
-import { createClientSupabase } from '@/lib/supabase';
+import { createDepartment } from '@/lib/client-queries';
 
 import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
@@ -65,19 +65,10 @@ export default function DepartmentCreateDialog({
     setLoading(true);
 
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        throw new Error('Failed to create Supabase client');
-      }
-
-      const { data, error } = await (supabase as any)
-        .from('departments')
-        .insert({
-          name: formData.name,
-          description: formData.description || null,
-        })
-        .select()
-        .single();
+      const { data, error } = await createDepartment({
+        name: formData.name,
+        description: formData.description || null,
+      });
 
       if (error) {
 

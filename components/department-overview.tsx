@@ -29,11 +29,12 @@ import {
   SortDesc,
   ExternalLink
 } from 'lucide-react';
-import { Department, createClientSupabase } from '@/lib/supabase';
+import { Department } from '@/lib/supabase';
+import { activeWorkflowInstances, taskHoursOfProjects, departmentIssues } from '@/lib/client-queries';
 
 import { UserWithRoles } from '@/lib/rbac-types';
 import { DepartmentMetrics, DepartmentProject } from '@/lib/department-client-service';
-import { projectIssuesService, type ProjectIssue } from '@/lib/project-issues-service';
+import { type ProjectIssue } from '@/lib/project-issues-service';
 import { format } from 'date-fns';
 import CapacityDashboard from '@/components/capacity-dashboard';
 
@@ -69,14 +70,8 @@ export function DepartmentOverview({
     const fetchTaskHours = async () => {
       if (!projects || projects.length === 0) return;
 
-      const supabase = createClientSupabase();
-      if (!supabase) return;
-
       const projectIds = projects.map((p: any) => p.id);
-      const { data: tasksData } = await supabase
-        .from('tasks')
-        .select('project_id, estimated_hours')
-        .in('project_id', projectIds);
+      const { data: tasksData } = await taskHoursOfProjects(projectIds);
 
       if (tasksData) {
         const projectTaskSum: Record<string, number> = {};
@@ -103,8 +98,8 @@ export function DepartmentOverview({
     const loadActiveIssues = async () => {
       try {
         setLoadingActiveIssues(true);
-        const issues = await projectIssuesService.getDepartmentActiveIssues(department.id);
-        setActiveIssues(issues);
+        const { data: issues } = await departmentIssues(department.id);
+        setActiveIssues(issues || []);
       } catch {
         setActiveIssues([]);
       } finally {
@@ -123,21 +118,8 @@ export function DepartmentOverview({
     }
 
     async function fetchWorkflowSteps() {
-      const supabase = createClientSupabase();
-      if (!supabase) return;
-
       const projectIds = projects.map((p: any) => p.id);
-      const { data: workflowData, error } = await supabase
-        .from('workflow_instances')
-        .select(`
-          project_id,
-          current_node_id,
-          workflow_nodes!workflow_instances_current_node_id_fkey (
-            label
-          )
-        `)
-        .in('project_id', projectIds)
-        .eq('status', 'active');
+      const { data: workflowData, error } = await activeWorkflowInstances(projectIds);
 
       if (!error && workflowData) {
         const steps: { [key: string]: string | null } = {};

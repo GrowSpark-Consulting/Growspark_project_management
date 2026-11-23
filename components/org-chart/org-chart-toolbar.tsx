@@ -25,7 +25,7 @@ import {
   Building2
 } from 'lucide-react';
 import { RoleCreationDialog } from './role-creation-dialog';
-import { organizationService } from '@/lib/organization-service';
+import { orgChart } from '@/lib/client-queries';
 
 interface OrgChartToolbarProps {
   viewType: 'hierarchy' | 'department';
@@ -62,7 +62,7 @@ export function OrgChartToolbar({
 
   const loadDepartments = async () => {
     try {
-      const orgStructure = await organizationService.getOrganizationStructure();
+      const orgStructure = (await orgChart('structure')).data;
       if (orgStructure) {
         setDepartments(orgStructure.departments.map((dept: any) => ({
           id: dept.id,

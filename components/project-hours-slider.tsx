@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { Clock } from 'lucide-react';
-import { createClientSupabase } from '@/lib/supabase';
+import { setRemainingHours } from '@/lib/client-queries';
 import { toast } from 'sonner';
 
 
@@ -95,22 +95,10 @@ export default function ProjectHoursSlider({
   const saveHours = async (newHours: number) => {
     setSaving(true);
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        toast.error('Failed to connect to database');
-        return;
-      }
-
       // Clamp to valid range
       const finalHours = Math.max(0, Math.min(newHours, maxHours));
 
-      const { error } = await (supabase as any)
-        .from('projects')
-        .update({
-          remaining_hours: finalHours,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', projectId);
+      const { error } = await setRemainingHours(projectId, finalHours);
 
       if (error) {
         toast.error('Failed to update remaining hours');
