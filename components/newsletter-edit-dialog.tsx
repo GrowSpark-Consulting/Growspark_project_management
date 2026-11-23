@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { newsletterService, Newsletter } from '@/lib/newsletter-service'
+import type { Newsletter } from '@/lib/modules/newsletters/types'
+import { apiSend } from '@/lib/client-api'
 import { toast } from 'sonner'
 
 interface NewsletterEditDialogProps {
@@ -46,7 +47,7 @@ export default function NewsletterEditDialog({
 
     setLoading(true)
     try {
-      await newsletterService.updateNewsletter(newsletter.id, formData)
+      await apiSend(`/api/newsletters/${newsletter.id}`, 'PATCH', formData)
       setOpen(false)
       onNewsletterUpdated?.()
       toast.success('Newsletter updated successfully!')

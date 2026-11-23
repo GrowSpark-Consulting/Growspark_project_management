@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { newsletterService, Newsletter } from '@/lib/newsletter-service'
+import type { Newsletter } from '@/lib/modules/newsletters/types'
+import { apiSend } from '@/lib/client-api'
 import { toast } from 'sonner'
 import { AlertTriangle, Trash2 } from 'lucide-react'
 import { isActionBlocked, getBlockedActionMessage } from '@/lib/demo-mode'
@@ -35,7 +36,7 @@ export default function NewsletterDeleteDialog({
 
     setLoading(true)
     try {
-      await newsletterService.deleteNewsletter(newsletter.id)
+      await apiSend(`/api/newsletters/${newsletter.id}`, 'DELETE')
       setOpen(false)
       onNewsletterDeleted?.()
       toast.success('Newsletter deleted successfully!')

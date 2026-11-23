@@ -6,7 +6,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { newsletterService, NewsletterInput } from '@/lib/newsletter-service'
+import type { NewsletterInput } from '@/lib/modules/newsletters/types'
+import { apiSend } from '@/lib/client-api'
 import { toast } from 'sonner'
 import { Plus, Send } from 'lucide-react'
 
@@ -35,7 +36,7 @@ export default function NewsletterCreationDialog({
 
     setLoading(true)
     try {
-      await newsletterService.createNewsletter(formData)
+      await apiSend('/api/newsletters', 'POST', formData)
       setFormData({ title: '', content: '' })
       setOpen(false)
       onNewsletterCreated?.()

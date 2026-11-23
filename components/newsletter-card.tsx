@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { newsletterService, Newsletter } from '@/lib/newsletter-service'
+import type { Newsletter } from '@/lib/modules/newsletters/types'
+import { apiGet } from '@/lib/client-api'
 import { formatDistanceToNow } from 'date-fns'
 import { Mail, Plus, Clock, User, Edit, Trash2 } from 'lucide-react'
 import NewsletterCreationDialog from './newsletter-creation-dialog'
@@ -64,7 +65,7 @@ export default function NewsletterCard({ className, canCreate = false }: Newslet
     try {
       setLoading(true)
       setError(null)
-      const data = await newsletterService.getPublishedNewsletters()
+      const { data } = await apiGet<{ data: Newsletter[] }>('/api/newsletters')
       setNewsletters(data)
     } catch (err: unknown) {
       setError('Failed to load newsletters')

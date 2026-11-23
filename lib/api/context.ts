@@ -78,13 +78,28 @@ export function api<P = Record<string, string>>(handler: Handler<P>, audience: A
   };
 }
 
+/**
+ * The Postgres error behind a failure. supabase-js returns it directly; Prisma (lib/db) wraps it, so
+ * its original SQLSTATE is unwrapped and the same mapping applies on both paths.
+ */
+function postgresError(error: unknown): { code?: string; message?: string } | null {
+  if (!error || typeof error !== 'object') return null;
+  const e = error as { code?: string; message?: string; meta?: { driverAdapterError?: { cause?: { originalCode?: string; code?: string; originalMessage?: string; message?: string } } } };
+  const cause = e.meta?.driverAdapterError?.cause;
+  if (cause && (cause.originalCode || cause.code)) {
+    return { code: cause.originalCode || cause.code, message: cause.originalMessage || cause.message };
+  }
+  return e;
+}
+
 export function errorResponse(error: unknown): NextResponse {
   if (error instanceof HttpError) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof AuthenticationError) return NextResponse.json({ error: error.message }, { status: 401 });
   if (error instanceof PermissionError || error instanceof ForbiddenError) {
     return NextResponse.json({ error: error.message }, { status: 403 });
   }
-  const pg = error as { code?: string; message?: string };
+  const pg = postgresError(error);
+  if (pg?.code === 'P2025') return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (pg && typeof pg === 'object' && pg.code) {
     if (pg.code === '42501') return NextResponse.json({ error: pg.message || 'Permission denied' }, { status: 403 });
     if (pg.code === '55006') return NextResponse.json({ error: pg.message }, { status: 409 });
