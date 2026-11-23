@@ -2,7 +2,7 @@
 
 Project Management runs on Render as one Node web service. It connects to Postgres through `DATABASE_URL`, like the other GSC apps: set the environment variables below and the app connects on start. No credentials live in the code.
 
-> **Not ready for the shared GrowSpark database yet.** Until every module has moved to the API and Prisma (Phase 11), parts of the app still read data through the Supabase Data API, which is switched off on the shared database. Deploy against it only after Phase 11 and the steps at the end of this page, and after approval.
+> **Not ready for the shared GrowSpark database yet.** Phase 11 is done: the app no longer uses the Supabase Data API (tested with it switched off), so `DATABASE_URL` must be set. Deploy against the shared database only after the remaining steps at the end of this page, and after approval.
 
 ## Service
 
@@ -35,7 +35,7 @@ Locally the same variables come from `.env.development.local` (local Docker data
 
 ## Before the first deploy against the shared database
 
-1. Phase 11 finished: no module uses the Supabase Data API.
+1. Phase 11 finished: no module uses the Supabase Data API. Done; proved with `tests/local-e2e/data-api-off-proxy.mjs`.
 2. Tables moved into the `project` schema; policies read the signed-in user from a function in `project` instead of `auth.uid()`, because `project_app` cannot use the `auth` schema there.
 3. A `project_user` role (no login, no row-level security bypass, access to `project` only) granted to `project_app`, and `DB_USER_ROLE=project_user`.
 4. A test connection from a staging service, including TLS to the pooler.
