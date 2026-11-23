@@ -101,7 +101,8 @@ describe.skipIf(!ready)('query layer matches the Supabase Data API', () => {
     const mismatches: string[] = [];
     for (const s of selects) {
       for (const who of ['system', 'pm'] as const) {
-        const run = (c: Both['rest'] | Both['layer']) => (c as any).from(s.table).select(s.select).limit(25);
+        // Whole visible set (rows are compared in any order); a 25-row sample without an order is arbitrary
+        const run = (c: Both['rest'] | Both['layer']) => (c as any).from(s.table).select(s.select).limit(1000);
         const [a, b] = await Promise.all([run(as[who].rest), run(as[who].layer)]);
         const ra = outcome(a), rb = outcome(b);
         if (JSON.stringify(ra) !== JSON.stringify(rb)) {

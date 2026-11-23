@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Circle, ArrowRight } from 'lucide-react';
-import { createClientSupabase } from '@/lib/supabase';
+import { workflowViewData } from '@/lib/client-queries';
 
 interface WorkflowTimelineProps {
   workflowInstanceId: string | null;
@@ -48,19 +48,10 @@ export function WorkflowTimeline({ workflowInstanceId }: WorkflowTimelineProps) 
   const loadWorkflowTimeline = useCallback(async () => {
     try {
       setLoading(true);
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // Get workflow instance with snapshot
-      const { data: instance, error: instanceError } = await supabase
-        .from('workflow_instances')
-        .select(`
-          *,
-          started_snapshot,
-          workflow_templates(name)
-        `)
-        .eq('id', workflowInstanceId!)
-        .single();
+      // The run and live template data for older runs (runs on the server as the user)
+      const { data: viewData } = await workflowViewData(workflowInstanceId!);
+      const instance = viewData?.instance;
+      const instanceError = !instance;
 
       if (instanceError || !instance) {
         return;
@@ -79,22 +70,13 @@ export function WorkflowTimeline({ workflowInstanceId }: WorkflowTimelineProps) 
         connections = (instance as WorkflowInstance).started_snapshot!.connections!;
       } else {
         // Fallback to live tables for older instances without snapshot
-        const { data: liveNodes, error: nodesError } = await supabase
-          .from('workflow_nodes')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id)
-          .order('position_y');
-
-        if (nodesError || !liveNodes) {
+        const liveNodes = viewData?.liveNodes;
+        if (!liveNodes) {
           return;
         }
 
-        const { data: liveConnections, error: connectionsError } = await supabase
-          .from('workflow_connections')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id);
-
-        if (connectionsError) {
+        const liveConnections = viewData?.liveConnections;
+        if (!liveConnections) {
           return;
         }
 

@@ -18,7 +18,7 @@ import '@xyflow/react/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { createClientSupabase } from '@/lib/supabase';
+import { workflowViewData } from '@/lib/client-queries';
 import { WorkflowVisualizationNode, VisualizationNodeData } from './workflow-visualization-node';
 
 interface WorkflowVisualizationProps {
@@ -258,20 +258,10 @@ function WorkflowVisualizationInner({
   const loadWorkflowVisualization = useCallback(async () => {
     try {
       setLoading(true);
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // Get workflow instance
-      const { data: instance, error: instanceError } = await supabase
-        .from('workflow_instances')
-        .select(`
-          *,
-          started_snapshot,
-          completed_snapshot,
-          workflow_templates(name)
-        `)
-        .eq('id', workflowInstanceId!)
-        .single();
+      // The run, live template data for older runs, steps and history (runs on the server as the user)
+      const { data: viewData } = await workflowViewData(workflowInstanceId!);
+      const instance = viewData?.instance;
+      const instanceError = !instance;
 
       if (instanceError || !instance) {
         return;
@@ -294,22 +284,14 @@ function WorkflowVisualizationInner({
         connections = (instance as WorkflowInstance).started_snapshot!.connections as unknown as WorkflowConnection[];
       } else {
         // Fallback to live tables for older instances without snapshot
-        const { data: liveNodes, error: nodesError } = await supabase
-          .from('workflow_nodes')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id);
-
-        if (nodesError || !liveNodes) {
+        const liveNodes = viewData?.liveNodes;
+        if (!liveNodes) {
           return;
         }
 
         // Get live connections
-        const { data: liveConnections, error: connectionsError } = await supabase
-          .from('workflow_connections')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id);
-
-        if (connectionsError) {
+        const liveConnections = viewData?.liveConnections;
+        if (!liveConnections) {
           return;
         }
 
@@ -318,19 +300,12 @@ function WorkflowVisualizationInner({
       }
 
       // Get active steps for parallel workflow support
-      const { data: steps } = await supabase
-        .from('workflow_active_steps')
-        .select('*')
-        .eq('workflow_instance_id', workflowInstanceId!)
-        .in('status', ['active', 'waiting']);
+      const steps = viewData?.activeSteps;
 
       setActiveSteps(steps || []);
 
       // Get workflow history to determine completed nodes
-      const { data: history } = await supabase
-        .from('workflow_history')
-        .select('from_node_id, to_node_id')
-        .eq('workflow_instance_id', workflowInstanceId!);
+      const history = viewData?.history;
 
       // Build set of completed node IDs
       const completed = new Set<string>();

@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { RoleGuard } from '@/components/role-guard'
-import { createClientSupabase } from '@/lib/supabase'
+import { projectPageData, setProjectEstimatedHours as saveEstimatedHours, deleteTask } from '@/lib/client-queries'
 import { ArrowLeft, Calendar, Clock, Building2, FolderOpen, Users, AlertCircle, FileText, AlertTriangle, Edit, Plus as PlusIcon, XCircle, CheckCircle2, List, LayoutGrid, GanttChart, RotateCcw, UserPlus, Trash2, Loader2, StickyNote, Pencil, GitBranch, X } from 'lucide-react'
 import Link from 'next/link'
 import TaskCreationDialog from '@/components/task-creation-dialog'
@@ -29,8 +29,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatDistance } from 'date-fns'
-import { accountService } from '@/lib/account-service'
-import { taskServiceDB, Task } from '@/lib/task-service-db'
+
+import { Task } from '@/lib/task-service-db'
 // Project access check is now simplified - if user can view project, they can add issues/updates
 // The API routes handle the actual permission validation via userHasProjectAccess()
 import { toast } from 'sonner'
@@ -487,26 +487,17 @@ export default function ProjectDetailPage() {
 
     setLoadingTasks(true)
     try {
-      // Get tasks for this specific project
-      const projectTasks = await taskServiceDB.getTasksByProject(projectId)
+      // Tasks of this project and the hours logged to the project without a task (runs on the server)
+      const { data: loaded } = await projectPageData(projectId, 'tasks')
+      const projectTasks = loaded?.tasks || []
       updateTasks(projectTasks)
 
       // Calculate estimated and remaining hours based on tasks
       const _calculatedHours = calculateEstimatedHours(projectTasks, project)
       const _remainingHours = calculateRemainingHours(projectTasks)
 
-      // Also fetch project-level time entries (logged to project without a specific task)
-      const supabase = createClientSupabase()
-      if (supabase) {
-        const { data: projectTimeEntries } = await supabase
-          .from('time_entries')
-          .select('hours_logged')
-          .eq('project_id', projectId)
-          .is('task_id', null)
-
-        const projectHours = projectTimeEntries?.reduce((sum: number, entry: { hours_logged: number | null }) => sum + (entry.hours_logged || 0), 0) || 0
-        setProjectLevelHours(projectHours)
-      }
+      // Project-level time entries (logged to the project without a specific task)
+      setProjectLevelHours(loaded?.projectHours || 0)
     } catch (_error: unknown) {
       // Error loading tasks - silently handled
     } finally {
@@ -544,277 +535,20 @@ export default function ProjectDetailPage() {
 
       try {
         setLoading(true)
-        // ⚠️ Force create a FRESH Supabase client (not singleton) to ensure auth token is present
-        const { createBrowserClient } = await import('@supabase/ssr')
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
-        )
-
-        // Verify auth session
-        const { data: _sessionData } = await supabase.auth.getSession()
-
-        // Fetch project with all related data
-        const { data, error: queryError } = await supabase
-          .from('projects')
-          .select(`
-            *,
-            account:accounts(*)
-          `)
-          .eq('id', projectId)
-          .maybeSingle()
-
-        if (queryError) {
-          throw new Error('Failed to load project')
+        // The project with its details, workflow step and edit right (runs on the server as the user)
+        const { data: loaded, error: loadError } = await projectPageData(projectId, 'overview')
+        if (loadError || !loaded) {
+          throw new Error(loadError instanceof Error ? loadError.message : 'Failed to load project')
         }
-
-        if (!data) {
-          // Project not found or user doesn't have access (RLS blocked)
-          throw new Error('Project not found or access denied')
-        }
-
-        // Fetch assigned user details
-        let assignedUser = null
-        if (data.assigned_user_id) {
-          const { data: userData } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('id', data.assigned_user_id)
-            .single()
-          assignedUser = userData
-        }
-
-        // Fetch stakeholders using SQL function (bypasses RLS - this is the reliable method)
-        const { data: stakeholdersRawData, error: _stakeholdersError } = await supabase
-          .rpc('get_project_stakeholders', { project_uuid: projectId })
-
-        // Transform SQL function output to match expected format
-        const stakeholdersData = stakeholdersRawData?.map((row: any) => ({
-          id: row.id,
-          user_id: row.user_id,
-          role: row.role,
-          user_profiles: {
-            id: row.user_id,
-            name: row.user_name,
-            email: row.user_email,
-            image: row.user_image
-          }
-        })) || []
-
-        // Get departments for this project via project_assignments (stakeholders)
-        const { data: assignments } = await supabase
-          .from('project_assignments')
-          .select('user_id')
-          .eq('project_id', projectId)
-          .is('removed_at', null)
-
-        const departments: Record<string, unknown>[] = []
-
-        // Add departments from assigned_user's roles (if they have an assigned user)
-        if (data.assigned_user_id) {
-          const { data: assignedUserRoles } = await supabase
-            .from('user_roles')
-            .select(`
-              role_id,
-              roles!user_roles_role_id_fkey (
-                department_id,
-                departments!roles_department_id_fkey (
-                  id,
-                  name
-                )
-              )
-            `)
-            .eq('user_id', data.assigned_user_id)
-
-          if (assignedUserRoles) {
-            assignedUserRoles.forEach((userRole: any) => {
-              const roles = userRole.roles as Record<string, unknown> | Record<string, unknown>[] | undefined
-              const role = roles ? (Array.isArray(roles) ? roles[0] : roles) : undefined
-              if (role) {
-                const depts = role.departments as Record<string, unknown> | Record<string, unknown>[] | undefined
-                const dept = depts ? (Array.isArray(depts) ? depts[0] : depts) : undefined
-                if (dept) {
-                  const exists = departments.some((d: any) => d.id === dept.id)
-                  if (!exists) {
-                    departments.push(dept)
-                  }
-                }
-              }
-            })
-          }
-        }
-
-        // Add departments from stakeholders (project_assignments)
-        if (assignments && assignments.length > 0) {
-          // Get unique user IDs from stakeholders
-          const stakeholderUserIds = assignments.map((a: any) => a.user_id).filter(Boolean)
-
-          if (stakeholderUserIds.length > 0) {
-            // Fetch user roles for all stakeholders
-            const { data: stakeholderRoles } = await supabase
-              .from('user_roles')
-              .select(`
-                user_id,
-                role_id,
-                roles!user_roles_role_id_fkey (
-                  department_id,
-                  departments!roles_department_id_fkey (
-                    id,
-                    name
-                  )
-                )
-              `)
-              .in('user_id', stakeholderUserIds)
-
-            if (stakeholderRoles) {
-              stakeholderRoles.forEach((userRole: any) => {
-                const roles = userRole.roles as Record<string, unknown> | Record<string, unknown>[] | undefined
-                const role = roles ? (Array.isArray(roles) ? roles[0] : roles) : undefined
-                if (role) {
-                  const depts = role.departments as Record<string, unknown> | Record<string, unknown>[] | undefined
-                  const dept = depts ? (Array.isArray(depts) ? depts[0] : depts) : undefined
-                  if (dept) {
-                    const exists = departments.some((d: any) => d.id === dept.id)
-                    if (!exists) {
-                      departments.push(dept)
-                    }
-                  }
-                }
-              })
-            }
-          }
-        }
-
-        // Check for ACTIVE workflow instance
-        // The projects table may have a stale workflow_instance_id from a cancelled/completed workflow
-        // We need to verify the workflow is actually active before using it
-        let workflowInstanceId: string | null = null
-
-        // First, check if there's an active workflow for this project
-        const { data: activeWorkflows, error: awError } = await supabase
-          .from('workflow_instances')
-          .select('id')
-          .eq('project_id', projectId)
-          .eq('status', 'active')
-          .order('started_at', { ascending: false })
-          .limit(1)
-
-        if (!awError && activeWorkflows && activeWorkflows.length > 0) {
-          workflowInstanceId = activeWorkflows[0].id
-        } else if (data.workflow_instance_id) {
-          // Check if the stored workflow_instance_id is still valid (active)
-          const { data: storedWorkflow } = await supabase
-            .from('workflow_instances')
-            .select('id, status')
-            .eq('id', data.workflow_instance_id)
-            .single()
-
-          if (storedWorkflow?.status === 'active') {
-            workflowInstanceId = storedWorkflow.id
-          } else {
-            // Stored workflow_instance_id is not active
-          }
-        }
-
-        // Fetch current workflow step name(s) if workflow exists
-        // For parallel workflows, show ALL active steps
-        if (workflowInstanceId) {
-          // First get the workflow instance to check for snapshot
-          const { data: instanceData } = await supabase
-            .from('workflow_instances')
-            .select('current_node_id, started_snapshot')
-            .eq('id', workflowInstanceId)
-            .single()
-
-          // Create a node lookup function that uses snapshot if available
-          const getNodeLabel = (nodeId: string): string | null => {
-            if (instanceData?.started_snapshot?.nodes) {
-              const node = instanceData.started_snapshot.nodes.find((n: any) => n.id === nodeId)
-              return node?.label || null
-            }
-            return null
-          }
-
-          // First, check for parallel workflow active steps
-          const { data: activeSteps, error: activeStepsError } = await supabase
-            .from('workflow_active_steps')
-            .select(`
-              node_id,
-              branch_id,
-              workflow_nodes!workflow_active_steps_node_id_fkey (
-                label,
-                node_type
-              )
-            `)
-            .eq('workflow_instance_id', workflowInstanceId)
-            .eq('status', 'active')
-
-          if (!activeStepsError && activeSteps && activeSteps.length > 0) {
-            // Get unique step labels (deduplicate)
-            // Try snapshot first, then FK join
-            const stepLabels = activeSteps
-              .map((step: any) => {
-                // First try snapshot
-                const snapshotLabel = getNodeLabel(step.node_id as string)
-                if (snapshotLabel) return snapshotLabel
-                // Fallback to FK join result
-                const workflowNodes = step.workflow_nodes as Record<string, unknown> | undefined
-                return workflowNodes?.label as string | undefined
-              })
-              .filter(Boolean)
-
-            // Remove duplicates using Set
-            const uniqueLabels = [...new Set(stepLabels)] as string[]
-
-            setWorkflowStepNames(uniqueLabels)
-          } else if (instanceData?.current_node_id) {
-            // Fallback to legacy current_node_id for older workflows
-            // First try snapshot
-            const snapshotLabel = getNodeLabel(instanceData.current_node_id)
-            if (snapshotLabel) {
-              setWorkflowStepNames([snapshotLabel])
-            } else {
-              // Fallback to FK join
-              const { data: workflowData, error: wfError } = await supabase
-                .from('workflow_instances')
-                .select(`
-                  current_node_id,
-                  workflow_nodes!workflow_instances_current_node_id_fkey (
-                    label,
-                    node_type
-                  )
-                `)
-                .eq('id', workflowInstanceId)
-                .single()
-
-              if (!wfError && workflowData?.workflow_nodes) {
-                const nodes = workflowData.workflow_nodes as Record<string, unknown> | Record<string, unknown>[]
-                const nodeData = Array.isArray(nodes) ? nodes[0] : nodes
-                setWorkflowStepNames(nodeData?.label ? [nodeData.label as string] : [])
-              }
-            }
-          }
-        }
-
-        // Transform the data to include all details
-        const projectWithDetails: ProjectWithDetails = {
-          ...data,
-          workflow_instance_id: workflowInstanceId,
-          departments: departments,
-          assigned_user: assignedUser,
-          stakeholders: stakeholdersData || []
-        }
-
+        if (loaded.stepNames) setWorkflowStepNames(loaded.stepNames)
+        const projectWithDetails: ProjectWithDetails = loaded.project
         setProject(projectWithDetails)
 
         // Initialize notes content
         setNotesContent(projectWithDetails.notes || '')
 
-        // Check if user can edit this project
-        if ((userProfile as any)?.id) {
-          const canEdit = await accountService.canUserEditProject((userProfile as any).id, projectId)
-          setCanEditProject(canEdit)
-        }
+        // Whether the user can edit this project
+        setCanEditProject(!!loaded.canEdit)
 
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Failed to load project')
@@ -836,8 +570,8 @@ export default function ProjectDetailPage() {
     if (!taskToDelete) return
 
     try {
-      const success = await taskServiceDB.deleteTask(taskToDelete)
-      if (success) {
+      const { error: deleteError } = await deleteTask(taskToDelete)
+      if (!deleteError) {
         // Reload tasks
         await loadTasks()
       } else {
@@ -927,43 +661,20 @@ export default function ProjectDetailPage() {
     setWorkflowRefreshKey(prev => prev + 1)
 
     try {
-      const supabase = createClientSupabase()
-      if (!supabase) return
-
       // Refresh workflow step name AND check if workflow is completed
       if (project?.workflow_instance_id) {
-        const { data: workflowData, error } = await supabase
-          .from('workflow_instances')
-          .select(`
-            current_node_id,
-            status,
-            workflow_nodes!workflow_instances_current_node_id_fkey (
-              label,
-              node_type
-            )
-          `)
-          .eq('id', project.workflow_instance_id)
-          .single()
+        const { data: workflowData, error } = await projectPageData(projectId, 'workflow-step', project.workflow_instance_id)
 
         if (!error && workflowData) {
           const wfData = workflowData as Record<string, unknown>
           const nodes = wfData.workflow_nodes as Record<string, unknown> | Record<string, unknown>[]
           const nodeData = Array.isArray(nodes) ? nodes[0] : nodes
           setWorkflowStepNames(nodeData?.label ? [nodeData.label as string] : [])
-
-          // If workflow is completed, refresh project data to update UI
-          if (wfData.status === 'completed') {
-            // Workflow completed - project data will be refreshed below
-          }
         }
       }
 
       // Always refresh project data to catch status changes (including completion)
-      const { data: projectData, error: projectError } = await supabase
-        .from('projects')
-        .select('status, completed_at, workflow_instance_id')
-        .eq('id', projectId)
-        .single()
+      const { data: projectData, error: projectError } = await projectPageData(projectId, 'status')
 
       if (!projectError && projectData) {
         const pData = projectData as Record<string, unknown>
@@ -1031,23 +742,15 @@ export default function ProjectDetailPage() {
       toast.success('Project reopened! It now operates without a workflow.')
 
       // Refresh project data to update UI
-      const supabase = createClientSupabase()
-      if (supabase) {
-        const { data: projectData } = await supabase
-          .from('projects')
-          .select('status, completed_at, workflow_instance_id')
-          .eq('id', projectId)
-          .single()
-
-        if (projectData) {
-          const pData = projectData as Record<string, unknown>
-          setProject(prev => prev ? ({
-            ...prev,
-            status: pData.status,
-            completed_at: pData.completed_at,
-            workflow_instance_id: pData.workflow_instance_id
-          } as ProjectWithDetails) : null)
-        }
+      const { data: projectData } = await projectPageData(projectId, 'status')
+      if (projectData) {
+        const pData = projectData as Record<string, unknown>
+        setProject(prev => prev ? ({
+          ...prev,
+          status: pData.status,
+          completed_at: pData.completed_at,
+          workflow_instance_id: pData.workflow_instance_id
+        } as ProjectWithDetails) : null)
       }
     } catch (_error: unknown) {
       toast.error('Failed to reopen project')
@@ -1083,23 +786,15 @@ export default function ProjectDetailPage() {
       toast.success('Project completed successfully!')
 
       // Refresh project data to update UI
-      const supabase = createClientSupabase()
-      if (supabase) {
-        const { data: projectData } = await supabase
-          .from('projects')
-          .select('status, completed_at, workflow_instance_id')
-          .eq('id', projectId)
-          .single()
-
-        if (projectData) {
-          const pData = projectData as Record<string, unknown>
-          setProject(prev => prev ? ({
-            ...prev,
-            status: pData.status,
-            completed_at: pData.completed_at,
-            workflow_instance_id: pData.workflow_instance_id
-          } as ProjectWithDetails) : null)
-        }
+      const { data: projectData } = await projectPageData(projectId, 'status')
+      if (projectData) {
+        const pData = projectData as Record<string, unknown>
+        setProject(prev => prev ? ({
+          ...prev,
+          status: pData.status,
+          completed_at: pData.completed_at,
+          workflow_instance_id: pData.workflow_instance_id
+        } as ProjectWithDetails) : null)
       }
     } catch (_error: unknown) {
       toast.error('Failed to complete project')
@@ -1120,22 +815,13 @@ export default function ProjectDetailPage() {
 
     setSavingProjectHours(true)
     try {
-      const supabase = createClientSupabase()
-      if (!supabase) throw new Error('Failed to create Supabase client')
-
       // Calculate task sum
       const taskSum = tasks.reduce((sum, task) => sum + (task.estimated_hours || 0), 0)
 
       // Use the higher of entered hours or task sum
       const finalHours = taskSum > hours ? taskSum : hours
 
-      const { error } = await (supabase as any)
-        .from('projects')
-        .update({
-          estimated_hours: finalHours,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', projectId)
+      const { error } = await saveEstimatedHours(projectId, finalHours)
 
       if (error) throw error
 
@@ -1169,25 +855,8 @@ export default function ProjectDetailPage() {
       }
 
       // Also get the workflow instance ID for node assignments
-      const supabaseResult2 = createClientSupabase()
-      if (supabaseResult2) {
-        const supabase2 = supabaseResult2 as any
-        const { data: instances, error: instanceError } = await supabase2
-          .from('workflow_instances')
-          .select('id, status')
-          .eq('project_id', projectId)
-          .in('status', ['active', 'completed'])
-          .order('started_at', { ascending: false })
-          .limit(1)
-
-        if (instanceError) {
-          // Error fetching workflow instance - silently handled
-        }
-
-        const instanceList = instances as Record<string, unknown>[] | null
-        const instance = instanceList?.[0]
-        setWorkflowInstanceId((instance?.id as string) || null)
-      }
+      const { data: instance } = await projectPageData(projectId, 'latest-run')
+      setWorkflowInstanceId((instance?.id as string) || null)
     } catch (_error: unknown) {
       // Error loading team members - silently handled
     } finally {
@@ -1287,53 +956,9 @@ export default function ProjectDetailPage() {
 
     setLoadingWorkflowContributors(true)
     try {
-      const supabaseResult3 = createClientSupabase()
-      if (!supabaseResult3) return
-      const supabase = supabaseResult3 as any
-
-      // Get all contributors from project_contributors table
-      // Note: This table may not exist in all installations - handle gracefully
-      const { data: contributors, error } = await supabase
-        .from('project_contributors')
-        .select('user_id, contribution_type, last_contributed_at')
-        .eq('project_id', projectId)
-        .order('last_contributed_at', { ascending: false })
-
-      if (error) {
-        // Table may not exist - silently return empty array
-        // This is expected for installations without the project_contributors table
-        setWorkflowContributors([])
-        return
-      }
-
-      if (!contributors || contributors.length === 0) {
-        setWorkflowContributors([])
-        return
-      }
-
-      // Get user details separately
-      const userIds = contributors.map((c: { user_id: string }) => c.user_id)
-      const { data: users, error: usersError } = await supabase
-        .from('user_profiles')
-        .select('id, name')
-        .in('id', userIds)
-
-      if (usersError) {
-        // Error loading user details - silently handled
-      }
-
-      // Create a map of user_id -> name
-      const userMap = new Map((users || []).map((u: { id: string; name: string }) => [u.id, u.name]))
-
-      // Transform the data
-      const formattedContributors = contributors.map((c: any) => ({
-        user_id: c.user_id as string,
-        name: userMap.get(c.user_id as string) || 'Unknown User',
-        contribution_type: c.contribution_type as string,
-        last_contributed_at: c.last_contributed_at as string
-      }))
-
-      setWorkflowContributors(formattedContributors)
+      // Contributors with their names (runs on the server; empty when the table does not exist)
+      const { data: contributors } = await projectPageData(projectId, 'contributors')
+      setWorkflowContributors(contributors || [])
     } catch (_error: unknown) {
       // Error loading workflow contributors - silently handled
     } finally {
@@ -1347,15 +972,8 @@ export default function ProjectDetailPage() {
 
     setLoadingAvailableUsers(true)
     try {
-      const supabaseResult4 = createClientSupabase()
-      if (!supabaseResult4) return
-      const supabase = supabaseResult4 as any
-
       // Get all users (excluding already assigned ones)
-      const { data: users, error } = await supabase
-        .from('user_profiles')
-        .select('id, name, email')
-        .order('name')
+      const { data: users, error } = await projectPageData(projectId, 'people')
 
       if (error) {
         return
@@ -1472,153 +1090,12 @@ export default function ProjectDetailPage() {
 
       try {
         setLoading(true)
-        // Create a fresh Supabase client with auth
-        const { createBrowserClient } = await import('@supabase/ssr')
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
-        )
-
-        // Fetch stakeholders using SQL function (same as initial load)
-        const { data: stakeholdersRawData, error: _stakeholdersError2 } = await supabase
-          .rpc('get_project_stakeholders', { project_uuid: projectId })
-
-        // Transform SQL function output
-        const stakeholdersData = stakeholdersRawData?.map((row: any) => ({
-          id: row.id,
-          user_id: row.user_id,
-          role: row.role,
-          user_profiles: {
-            id: row.user_id,
-            name: row.user_name,
-            email: row.user_email,
-            image: row.user_image
-          }
-        })) || []
-
-        // Fetch project with all related data
-        const { data, error: queryError } = await supabase
-          .from('projects')
-          .select(`
-            *,
-            account:accounts(*)
-          `)
-          .eq('id', projectId)
-          .maybeSingle()
-
-        if (queryError) {
-          throw new Error('Failed to load project')
+        // Same lookup as the initial load (runs on the server as the user)
+        const { data: loaded, error: loadError } = await projectPageData(projectId, 'overview')
+        if (loadError || !loaded) {
+          throw new Error(loadError instanceof Error ? loadError.message : 'Failed to load project')
         }
-
-        if (!data) {
-          // Project not found or user doesn't have access (RLS blocked)
-          throw new Error('Project not found or access denied')
-        }
-
-        // Fetch assigned user details
-        let assignedUser = null
-        if (data.assigned_user_id) {
-          const { data: userData } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('id', data.assigned_user_id)
-            .single()
-          assignedUser = userData
-        }
-
-        // Get departments for this project via project_assignments (stakeholders)
-        const { data: reloadAssignments } = await supabase
-          .from('project_assignments')
-          .select('user_id')
-          .eq('project_id', projectId)
-          .is('removed_at', null)
-
-        const reloadDepartments: Record<string, unknown>[] = []
-
-        // Add departments from assigned_user's roles (if they have an assigned user)
-        if (data.assigned_user_id) {
-          const { data: reloadAssignedUserRoles } = await supabase
-            .from('user_roles')
-            .select(`
-              role_id,
-              roles!user_roles_role_id_fkey (
-                department_id,
-                departments!roles_department_id_fkey (
-                  id,
-                  name
-                )
-              )
-            `)
-            .eq('user_id', data.assigned_user_id)
-
-          if (reloadAssignedUserRoles) {
-            reloadAssignedUserRoles.forEach((userRole: any) => {
-              const roles = userRole.roles as Record<string, unknown> | Record<string, unknown>[] | undefined
-              const role = roles ? (Array.isArray(roles) ? roles[0] : roles) : undefined
-              if (role) {
-                const depts = role.departments as Record<string, unknown> | Record<string, unknown>[] | undefined
-                const dept = depts ? (Array.isArray(depts) ? depts[0] : depts) : undefined
-                if (dept) {
-                  const exists = reloadDepartments.some((d: any) => d.id === dept.id)
-                  if (!exists) {
-                    reloadDepartments.push(dept)
-                  }
-                }
-              }
-            })
-          }
-        }
-
-        // Add departments from stakeholders (project_assignments)
-        if (reloadAssignments && reloadAssignments.length > 0) {
-          // Get unique user IDs from stakeholders
-          const reloadStakeholderUserIds = reloadAssignments.map((a: any) => a.user_id).filter(Boolean)
-
-          if (reloadStakeholderUserIds.length > 0) {
-            // Fetch user roles for all stakeholders
-            const { data: reloadStakeholderRoles } = await supabase
-              .from('user_roles')
-              .select(`
-                user_id,
-                role_id,
-                roles!user_roles_role_id_fkey (
-                  department_id,
-                  departments!roles_department_id_fkey (
-                    id,
-                    name
-                  )
-                )
-              `)
-              .in('user_id', reloadStakeholderUserIds)
-
-            if (reloadStakeholderRoles) {
-              reloadStakeholderRoles.forEach((userRole: any) => {
-                const roles = userRole.roles as Record<string, unknown> | Record<string, unknown>[] | undefined
-                const role = roles ? (Array.isArray(roles) ? roles[0] : roles) : undefined
-                if (role) {
-                  const depts = role.departments as Record<string, unknown> | Record<string, unknown>[] | undefined
-                  const dept = depts ? (Array.isArray(depts) ? depts[0] : depts) : undefined
-                  if (dept) {
-                    const exists = reloadDepartments.some((d: any) => d.id === dept.id)
-                    if (!exists) {
-                      reloadDepartments.push(dept)
-                    }
-                  }
-                }
-              })
-            }
-          }
-        }
-
-        // Transform the data to include all details
-        const projectWithDetails: ProjectWithDetails = {
-          ...data,
-          departments: reloadDepartments,
-          assigned_user: assignedUser,
-          stakeholders: stakeholdersData || []
-        }
-
-        setProject(projectWithDetails)
+        setProject(loaded.project as ProjectWithDetails)
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Failed to load project')
       } finally {
@@ -1723,90 +1200,13 @@ export default function ProjectDetailPage() {
 
     setLoadingWorkflowFormData(true)
     try {
-      const supabaseResult5 = createClientSupabase()
-      if (!supabaseResult5) return
-      const supabase = supabaseResult5 as any
-
-      // Get workflow history entries with form data
-      const { data: historyEntries, error: historyError } = await supabase
-        .from('workflow_history')
-        .select(`
-          id,
-          created_at,
-          notes,
-          form_response_id,
-          to_node_id,
-          transitioned_by,
-          workflow_nodes!workflow_history_to_node_id_fkey(label),
-          user_profiles!workflow_history_transitioned_by_fkey(name)
-        `)
-        .eq('workflow_instance_id', project.workflow_instance_id)
-        .order('created_at', { ascending: true })
-
-      if (historyError) {
+      // Forms submitted during the workflow run (runs on the server as the user)
+      const { data: formDataEntries, error: formDataError } = await projectPageData(projectId, 'form-data', project.workflow_instance_id)
+      if (formDataError || !formDataEntries) {
         return
       }
 
-      const formDataEntries: WorkflowFormDataEntry[] = []
-      const entries = (historyEntries || []) as Record<string, unknown>[]
-
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i]
-
-        // Approval decision is not stored in workflow_history directly
-        // It would need to be derived from form responses or notes if needed
-        const approvalDecision: 'approved' | 'rejected' | null = null
-
-        // Check for linked form response
-        if (entry.form_response_id) {
-          const { data: formResponse } = await supabase
-            .from('form_responses')
-            .select(`
-              response_data,
-              submitted_at,
-              form_template:form_templates(name, fields)
-            `)
-            .eq('id', entry.form_response_id)
-            .single()
-
-          if (formResponse) {
-            const formResp = formResponse as Record<string, unknown>
-            formDataEntries.push({
-              id: entry.id as string,
-              formName: ((formResp.form_template as Record<string, unknown>)?.name as string) || null,
-              stepName: ((entry.workflow_nodes as Record<string, unknown>)?.label as string) || null,
-              submittedAt: (formResp.submitted_at as string) || (entry.created_at as string),
-              submittedBy: ((entry.user_profiles as Record<string, unknown>)?.name as string) || null,
-              responseData: (formResp.response_data as Record<string, Record<string, unknown>>) || {},
-              fields: ((formResp.form_template as Record<string, unknown>)?.fields as Array<{ id: string; label: string; type: string }>) || null,
-              approvalDecision
-            })
-          }
-        }
-        // Check for inline form data in notes
-        else if (entry.notes) {
-          try {
-            const notesData = JSON.parse(entry.notes as string) as Record<string, unknown>
-            if (notesData.type === 'inline_form' && notesData.data) {
-              const notesDataData = notesData.data as Record<string, unknown>
-              formDataEntries.push({
-                id: entry.id as string,
-                formName: (notesDataData.formName as string) || null,
-                stepName: ((entry.workflow_nodes as Record<string, unknown>)?.label as string) || null,
-                submittedAt: entry.created_at as string,
-                submittedBy: ((entry.user_profiles as Record<string, unknown>)?.name as string) || null,
-                responseData: (notesDataData.responses as Record<string, Record<string, unknown>>) || {},
-                fields: (notesDataData.fields as Array<{ id: string; label: string; type: string }>) || null,
-                approvalDecision
-              })
-            }
-          } catch {
-            // Notes is not JSON, skip
-          }
-        }
-      }
-
-      setWorkflowFormData(formDataEntries)
+      setWorkflowFormData(formDataEntries as WorkflowFormDataEntry[])
     } catch (_error: unknown) {
       // Error loading workflow form data - silently handled
     } finally {

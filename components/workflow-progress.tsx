@@ -4,7 +4,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { createClientSupabase } from '@/lib/supabase';
+import { workflowViewData } from '@/lib/client-queries';
 import {
   Play,
   GitBranch,
@@ -324,19 +324,10 @@ export function WorkflowProgress({ workflowInstanceId, onStepClick }: WorkflowPr
   const loadWorkflowProgress = useCallback(async () => {
     try {
       setLoading(true);
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // Get workflow instance with snapshot
-      const { data: instance, error: instanceError } = await supabase
-        .from('workflow_instances')
-        .select(`
-          *,
-          started_snapshot,
-          workflow_templates(name)
-        `)
-        .eq('id', workflowInstanceId!)
-        .single();
+      // The run, live template data for older runs, and active steps (runs on the server as the user)
+      const { data: viewData } = await workflowViewData(workflowInstanceId!);
+      const instance = viewData?.instance;
+      const instanceError = !instance;
 
       if (instanceError || !instance) {
         return;
@@ -354,22 +345,14 @@ export function WorkflowProgress({ workflowInstanceId, onStepClick }: WorkflowPr
         connections = (instance as WorkflowInstance).started_snapshot!.connections;
       } else {
         // Fallback to live tables for older instances without snapshot
-        const { data: liveNodes, error: nodesError } = await supabase
-          .from('workflow_nodes')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id);
-
-        if (nodesError || !liveNodes) {
+        const liveNodes = viewData?.liveNodes;
+        if (!liveNodes) {
           return;
         }
         allNodes = liveNodes as WorkflowNode[];
 
-        const { data: liveConnections, error: connectionsError } = await supabase
-          .from('workflow_connections')
-          .select('*')
-          .eq('workflow_template_id', (instance as WorkflowInstance).workflow_template_id);
-
-        if (connectionsError) {
+        const liveConnections = viewData?.liveConnections;
+        if (!liveConnections) {
           return;
         }
         connections = liveConnections || [];
@@ -395,16 +378,9 @@ export function WorkflowProgress({ workflowInstanceId, onStepClick }: WorkflowPr
       }
 
       // Get active steps (parallel workflow support)
-      const { data: activeSteps, error: stepsError } = await supabase
-        .from('workflow_active_steps')
-        .select(`
-          *,
-          assigned_user:user_profiles!workflow_active_steps_assigned_user_id_fkey(name)
-        `)
-        .eq('workflow_instance_id', workflowInstanceId!)
-        .in('status', ['active', 'waiting']);
+      const activeSteps = viewData?.activeSteps;
 
-      if (stepsError) {
+      if (!activeSteps) {
         // Error loading active steps handled by fallback logic below
       }
 

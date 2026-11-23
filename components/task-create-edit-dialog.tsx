@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { Task } from '@/lib/task-service-db';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { createClientSupabase } from '@/lib/supabase';
+import { assignablePeople } from '@/lib/client-queries';
 import { TASK_STATUSES, statusLabel, normalizeStatus } from '@/lib/task-rules';
 
 
@@ -59,136 +59,11 @@ export default function TaskCreateEditDialog({
   const loadUsers = useCallback(async () => {
     try {
       setLoadingUsers(true);
-      const supabase = createClientSupabase() as any;
-
-      if (!supabase) {
-        toast.error('Failed to load team members');
-        setUsers([]);
-        return;
-      }
-
-      // First, get the project to find its account_id
-      const { data: projectData, error: projectError } = await supabase
-        .from('projects')
-        .select('id, account_id')
-        .eq('id', projectId)
-        .single();
-
-      if (projectError || !projectData) {
-        setUsers([]);
-        return;
-      }
-
-      const uniqueUsersMap = new Map<string, { id: string; name: string; roles: string[] }>();
-
-      // 1. Account members are no longer offered: an assignee must be on the project team
-      //    (the API rejects anyone else). Kept for reference; disabled.
-      const includeAccountMembers = false;
-      if (includeAccountMembers && projectData.account_id) {
-        const { data: accountMembers, error: accountError } = await supabase
-          .from('account_members')
-          .select(`
-            user_id,
-            user_profiles!account_members_user_id_fkey (
-              id,
-              name,
-              email
-            )
-          `)
-          .eq('account_id', projectData.account_id);
-
-        if (accountError) {
-          // Account members failed to load - continue with project assignments
-        }
-
-        if (accountMembers) {
-          for (const member of accountMembers) {
-            const userProfile = member.user_profiles as Record<string, unknown> | undefined;
-            if (userProfile && (userProfile as any).id) {
-              const userId = (userProfile as any).id as string;
-              if (!uniqueUsersMap.has(userId)) {
-                uniqueUsersMap.set(userId, {
-                  id: userId,
-                  name: ((userProfile as any).name as string | undefined) || 'Unknown',
-                  roles: []
-                });
-              }
-            }
-          }
-        }
-      }
-
-      // 2. Get users assigned to this project
-      const { data: projectMembers, error: assignmentError } = await supabase
-        .from('project_assignments')
-        .select(`
-          user_id,
-          user_profiles!project_assignments_user_id_fkey (
-            id,
-            name,
-            email
-          )
-        `)
-        .eq('project_id', projectId)
-        .is('removed_at', null);
-
-      if (assignmentError) {
-        // Project assignments failed to load - continue with available data
-      }
-
-      if (projectMembers) {
-        for (const member of projectMembers) {
-          const userProfile = member.user_profiles as Record<string, unknown> | undefined;
-          if (userProfile && (userProfile as any).id) {
-            const userId = (userProfile as any).id as string;
-            if (!uniqueUsersMap.has(userId)) {
-              uniqueUsersMap.set(userId, {
-                id: userId,
-                name: ((userProfile as any).name as string | undefined) || 'Unknown',
-                roles: []
-              });
-            }
-          }
-        }
-      }
-
-      // 3. Get roles for all users we found
-      const userIds = Array.from(uniqueUsersMap.keys());
-      if (userIds.length > 0) {
-        const { data: userRolesData, error: rolesError } = await supabase
-          .from('user_roles')
-          .select(`
-            user_id,
-            roles!user_roles_role_id_fkey (
-              id,
-              name
-            )
-          `)
-          .in('user_id', userIds);
-
-        if (!rolesError && userRolesData) {
-          for (const ur of userRolesData) {
-            const userId = ur.user_id as string;
-            const role = ur.roles as Record<string, unknown> | undefined;
-            const roleName = (role?.name as string | undefined) || 'No Role';
-
-            const existingUser = uniqueUsersMap.get(userId);
-            if (existingUser && !existingUser.roles.includes(roleName)) {
-              existingUser.roles.push(roleName);
-            }
-          }
-        }
-      }
-
-      // Set default role for users without any
-      uniqueUsersMap.forEach((user) => {
-        if (user.roles.length === 0) {
-          user.roles = ['Team Member'];
-        }
-      });
-
-      const usersWithRoles = Array.from(uniqueUsersMap.values());
-      setUsers(usersWithRoles);
+      // The project team with role names (runs on the server as the user)
+      const { data: people, error: peopleError } = await assignablePeople(projectId);
+      if (peopleError) throw peopleError;
+      setUsers(people || []);
+      return;
     } catch {
       toast.error('Failed to load team members for assignment');
       setUsers([]);

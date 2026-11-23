@@ -26,12 +26,10 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowRight, CheckCircle2, XCircle, Send, Loader2, FileText, Clock, User } from 'lucide-react';
 import { toast } from 'sonner';
-import { createClientSupabase } from '@/lib/supabase';
+import { workflowProgress } from '@/lib/client-queries';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
-import { isClientApprovalNode } from '@/lib/workflow-client-approval';
-import { departmentMemberProfiles, profileDepartmentIds } from '@/lib/department-membership';
 
 interface WorkflowProgressButtonProps {
   projectId: string;
@@ -125,39 +123,6 @@ function _renderMarkdownContent(content: string): React.ReactNode {
     }
     return <span key={index}>{part}</span>;
   });
-}
-
-// People who can be picked for a step: the department's members for a department step (through a role
-// in it or added directly), otherwise holders of the step's role. Null when the step names nobody.
-async function loadNodeUsers(supabase: any, node: any): Promise<User[] | null> {
-  if (!node?.entity_id) return null;
-  if (node.node_type === 'department') return departmentMemberProfiles(supabase, node.entity_id);
-  const { data: userRoles } = await supabase
-    .from('user_roles')
-    .select('user_id, users!user_roles_user_id_fkey(id, name, email)')
-    .eq('role_id', node.entity_id);
-  if (!userRoles) return null;
-  return (userRoles as any[]).map((ur: any) => ur.users).filter((u: any) => u !== null) as User[];
-}
-
-// The node this button would progress: the given active step's node, else the current node, else the
-// newest active step's node. Read from the workflow's snapshot, or the live table for older workflows.
-async function loadStepNode(supabase: any, instance: any, workflowInstanceId: string, activeStepId?: string | null) {
-  let nodeId: string | null = instance?.current_node_id ?? null;
-  if (activeStepId) {
-    const { data: step } = await supabase.from('workflow_active_steps').select('node_id').eq('id', activeStepId).maybeSingle();
-    nodeId = step?.node_id ?? nodeId;
-  } else if (!nodeId) {
-    const { data: steps } = await supabase.from('workflow_active_steps').select('node_id')
-      .eq('workflow_instance_id', workflowInstanceId).eq('status', 'active')
-      .order('activated_at', { ascending: false }).limit(1);
-    nodeId = steps?.[0]?.node_id ?? null;
-  }
-  if (!nodeId) return null;
-  const fromSnapshot = (instance?.started_snapshot?.nodes || []).find((n: any) => n.id === nodeId);
-  if (fromSnapshot) return fromSnapshot;
-  const { data: live } = await supabase.from('workflow_nodes').select('node_type, label, settings').eq('id', nodeId).maybeSingle();
-  return live ?? null;
 }
 
 export function WorkflowProgressButton({
@@ -348,237 +313,17 @@ export function WorkflowProgressButton({
       }
 
       try {
-        const supabase = createClientSupabase() as any;
-        if (!supabase) return;
-
-        // Get workflow instance with snapshot (don't rely on FK join which fails when template is deleted)
-        const { data: instance, error } = await supabase
-          .from('workflow_instances')
-          .select(`
-            *,
-            started_snapshot
-          `)
-          .eq('id', workflowInstanceId)
-          .single();
-
-        if (error || !instance) {
-          return;
-        }
-
-        // Get current node from snapshot (preferred) or live table (fallback)
-        const snapshotNodes = ((instance as any).started_snapshot?.nodes || []) as any[];
-        const hasSnapshot = snapshotNodes.length > 0;
-
-        let currentNodeFromSnapshot = null;
-        if (hasSnapshot && (instance as any).current_node_id) {
-          currentNodeFromSnapshot = snapshotNodes.find((n: any) => n.id === (instance as any).current_node_id);
-        }
-
-        // Attach the node info to instance for later use
-        const instanceWithNode: any = {
-          ...(instance as any),
-          workflow_nodes: currentNodeFromSnapshot
-        };
-
-        // A client-approval step is decided by the client in the client portal, for everyone here
-        const stepNode = await loadStepNode(supabase, instance, workflowInstanceId, externalActiveStepId);
-        setClientApprovalStep(isClientApprovalNode(stepNode) ? String(stepNode?.label || 'This step') : null);
-
-        // Check if user is superadmin (bypasses all checks)
-        const userIsSuperadmin = (userProfile as any).is_superadmin ||
-          userProfile.user_roles?.some((ur: any) => (ur.roles as any)?.name?.toLowerCase() === 'superadmin');
-
-        setIsSuperadmin(userIsSuperadmin);
-
-        if (userIsSuperadmin) {
-          setHasRequiredRole(true);
-          setIsAssignedToProject(true);
-          return;
-        }
-
-        // Get the node_id to check for node assignments
-        // ALWAYS check for active steps first - this handles cases where:
-        // 1. externalActiveStepId is provided
-        // 2. current_node_id is null (template was modified/deleted)
-        // 3. workflow is using snapshot-based execution
-        let nodeIdToCheck: string | null = (instance as any).current_node_id;
-        let hasNodeAssignment = false;
-        let isAssignedToActiveStep = false;
-
-        if (externalActiveStepId) {
-          // Get the node_id and assigned_user_id from the provided active step
-          const { data: activeStep } = await supabase
-            .from('workflow_active_steps')
-            .select('node_id, assigned_user_id')
-            .eq('id', externalActiveStepId)
-            .single();
-
-          if (activeStep) {
-            nodeIdToCheck = (activeStep as any).node_id;
-            // Check if user is directly assigned to this active step (e.g., sync leader)
-            if ((activeStep as any).assigned_user_id === (userProfile as any).id) {
-              isAssignedToActiveStep = true;
-            }
-          }
-        } else if (!nodeIdToCheck) {
-          // No current_node_id - try to find from active steps
-          const { data: activeSteps } = await supabase
-            .from('workflow_active_steps')
-            .select('node_id, assigned_user_id')
-            .eq('workflow_instance_id', workflowInstanceId)
-            .eq('status', 'active')
-            .order('activated_at', { ascending: false })
-            .limit(1);
-
-          if (activeSteps && activeSteps.length > 0) {
-            nodeIdToCheck = (activeSteps[0] as any).node_id;
-            if ((activeSteps[0] as any).assigned_user_id === (userProfile as any).id) {
-              isAssignedToActiveStep = true;
-            }
-          }
-        }
-
-        // Update the node in instanceWithNode using snapshot if available
-        if (nodeIdToCheck && hasSnapshot) {
-          const nodeFromSnapshot = snapshotNodes.find((n: any) => n.id === nodeIdToCheck);
-          if (nodeFromSnapshot) {
-            instanceWithNode.workflow_nodes = nodeFromSnapshot;
-          }
-        }
-
-        // If user is assigned to the active step (like sync leader), grant access
-        if (isAssignedToActiveStep) {
-          hasNodeAssignment = true;
-          setHasRequiredRole(true);
-          setRequiredRoleName(null);
-        }
-
-        // Check if user is explicitly assigned to this workflow node via workflow_node_assignments
-        // This bypasses the entity requirement check
-        if (!hasNodeAssignment && nodeIdToCheck) {
-          const { data: nodeAssignment } = await supabase
-            .from('workflow_node_assignments')
-            .select('id')
-            .eq('workflow_instance_id', workflowInstanceId)
-            .eq('node_id', nodeIdToCheck)
-            .eq('user_id', (userProfile as any).id)
-            .maybeSingle();
-
-          if (nodeAssignment) {
-            // User is explicitly assigned to this node - allow them to progress it
-            hasNodeAssignment = true;
-            setHasRequiredRole(true);
-            setRequiredRoleName(null);
-            // Still need to check project assignment below
-          }
-        }
-
-        // 1. CHECK PROJECT ASSIGNMENT (via project_assignments table only)
-        // NOTE: created_by and assigned_user_id on the project do NOT grant workflow progression rights
-        if ((instance as any).project_id) {
-          const { data: assignments } = await supabase
-            .from('project_assignments')
-            .select('id')
-            .eq('user_id', (userProfile as any).id)
-            .eq('project_id', (instance as any).project_id)
-            .is('removed_at', null);
-
-          setIsAssignedToProject((assignments?.length || 0) > 0);
-        } else {
-          setIsAssignedToProject(true); // No project restriction
-        }
-
-        // If user has explicit node assignment, skip entity check (already allowed)
-        if (hasNodeAssignment) {
-          return;
-        }
-
-        // 2. CHECK ENTITY REQUIREMENT based on node type
-        const currentNode = instanceWithNode.workflow_nodes;
-
-        // If the node has no entity_id, anyone assigned can progress
-        if (!currentNode?.entity_id) {
-          setHasRequiredRole(true);
-          setRequiredRoleName(null);
-          return;
-        }
-
-        // Handle different node types
-        if (currentNode.node_type === 'role' || currentNode.node_type === 'approval') {
-          // For role and approval nodes, entity_id is a role_id
-          const userRoleIds = userProfile.user_roles?.map((ur: any) => ur.role_id) || [];
-          const hasRole = userRoleIds.includes(currentNode.entity_id);
-          setHasRequiredRole(hasRole);
-
-          // Get the role name for display if user doesn't have it
-          if (!hasRole) {
-            const { data: roleData } = await supabase
-              .from('roles')
-              .select('name')
-              .eq('id', currentNode.entity_id)
-              .single();
-
-            setRequiredRoleName((roleData as any)?.name || null);
-          } else {
-            setRequiredRoleName(null);
-          }
-        } else if (currentNode.node_type === 'department') {
-          // For department nodes, entity_id is a department_id
-          // The user must be in this department (through a role in it, or added directly)
-          const hasAccess = profileDepartmentIds(userProfile as any).includes(currentNode.entity_id);
-          setHasRequiredRole(hasAccess);
-
-          // Get department name for display if user doesn't have access
-          if (!hasAccess) {
-            const { data: deptData } = await supabase
-              .from('departments')
-              .select('name')
-              .eq('id', currentNode.entity_id)
-              .single();
-
-            setRequiredRoleName((deptData as any)?.name ? `${(deptData as any).name} department` : null);
-          } else {
-            setRequiredRoleName(null);
-          }
-        } else {
-          // For form, conditional, start, end nodes - no entity validation needed
-          setHasRequiredRole(true);
-          setRequiredRoleName(null);
-        }
-
-        // PIPELINE DETECTION: If user doesn't have role for current step,
-        // check if they're assigned to a FUTURE step in this workflow
-        if (!hasNodeAssignment) {
-          const userRoleIds = userProfile.user_roles?.map((ur: any) => ur.role_id) || [];
-          const hasRole = currentNode?.entity_id ? userRoleIds.includes(currentNode.entity_id) : true;
-
-          if (!hasRole) {
-            // User can't act on current step - check if they're assigned to a future node
-            // Query just the node_id (don't join with workflow_nodes which may fail if template deleted)
-            const { data: futureAssignments } = await supabase
-              .from('workflow_node_assignments')
-              .select('node_id')
-              .eq('workflow_instance_id', workflowInstanceId)
-              .eq('user_id', (userProfile as any).id)
-              .neq('node_id', nodeIdToCheck || '');
-
-            if (futureAssignments && futureAssignments.length > 0) {
-              // User is assigned to a future step - get label from snapshot
-              const futureNodeId = (futureAssignments[0] as any).node_id;
-              const futureNode = hasSnapshot
-                ? snapshotNodes.find((n: any) => n.id === futureNodeId)
-                : null;
-
-              setIsPipelineProject(true);
-              setAssignedFutureStepName((futureNode as any)?.label || 'a future step');
-              setCurrentStepName(currentNode?.label || 'the current step');
-            } else {
-              setIsPipelineProject(false);
-              setAssignedFutureStepName(null);
-              setCurrentStepName(null);
-            }
-          }
-        }
+        // The checks run on the server as the user (lib/workflow-progress-data.ts)
+        const { data: access } = await workflowProgress(workflowInstanceId, { view: 'access', activeStepId: externalActiveStepId || undefined });
+        if (!access) return;
+        if (access.clientApprovalStep !== undefined) setClientApprovalStep(access.clientApprovalStep);
+        if (access.isSuperadmin !== undefined) setIsSuperadmin(access.isSuperadmin);
+        if (access.hasRequiredRole !== undefined) setHasRequiredRole(access.hasRequiredRole);
+        if (access.requiredRoleName !== undefined) setRequiredRoleName(access.requiredRoleName);
+        if (access.isAssignedToProject !== undefined) setIsAssignedToProject(access.isAssignedToProject);
+        if (access.isPipelineProject !== undefined) setIsPipelineProject(access.isPipelineProject);
+        if (access.assignedFutureStepName !== undefined) setAssignedFutureStepName(access.assignedFutureStepName);
+        if (access.currentStepName !== undefined) setCurrentStepName(access.currentStepName);
       } catch (error: unknown) {
         // On error, default to hiding the button for safety
         setHasRequiredRole(false);
@@ -594,32 +339,14 @@ export function WorkflowProgressButton({
   const loadWorkflowData = useCallback(async () => {
     try {
       setLoading(true);
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // First, get the workflow instance (including snapshot)
-      const { data: instance, error: instanceError } = await supabase
-        .from('workflow_instances')
-        .select(`
-          *,
-          started_snapshot,
-          workflow_templates(*)
-        `)
-        .eq('id', workflowInstanceId as string)
-        .single();
-
-      if (instanceError || !instance) {
-        return;
-      }
-
-      // Extract snapshot data for use throughout the function
-      // This ensures we use the workflow configuration from when the project started
-      const snapshotNodes = ((instance as any).started_snapshot?.nodes || []) as any[];
-      const snapshotConnections = ((instance as any).started_snapshot?.connections || []) as any[];
-      const hasSnapshot = snapshotNodes.length > 0 && snapshotConnections.length > 0;
+      // The lookups run on the server as the user (lib/workflow-progress-data.ts)
+      const { data: d } = await workflowProgress(workflowInstanceId as string, {
+        view: 'data', projectId, activeStepId: externalActiveStepId || undefined, branchId: branchId || undefined,
+      });
+      if (!d) return;
 
       // Check for stale data - if workflow was updated since we last loaded
-      const currentUpdatedAt = (instance as any).updated_at;
+      const currentUpdatedAt = d.updatedAt;
       if (lastKnownUpdatedAt && currentUpdatedAt && lastKnownUpdatedAt !== currentUpdatedAt) {
         // Workflow was updated by someone else
         setIsStaleData(true);
@@ -628,232 +355,16 @@ export function WorkflowProgressButton({
       }
       setLastKnownUpdatedAt(currentUpdatedAt);
 
-      // Determine which node to load:
-      // 1. If externalActiveStepId is provided, use that step's node
-      // 2. Otherwise, ALWAYS check for active steps in workflow_active_steps table
-      //    (this is critical when current_node_id is null or template was deleted)
-      // 3. Fall back to current_node_id for legacy workflows
-      let nodeIdToLoad = (instance as any).current_node_id;
-      let activeStepIdToUse: string | null = externalActiveStepId || null;
+      if (d.branchId !== undefined) setBranchId(d.branchId);
+      setCurrentActiveStepId(d.activeStepIdToUse);
+      setWorkflowInstance(d.instance);
+      setExistingFormData(d.existingFormData);
 
-      if (externalActiveStepId) {
-        // Get the node_id and branch_id from the provided active step
-        const { data: activeStep } = await supabase
-          .from('workflow_active_steps')
-          .select('node_id, branch_id')
-          .eq('id', externalActiveStepId)
-          .single();
-
-        if (activeStep) {
-          nodeIdToLoad = (activeStep as any).node_id;
-          setBranchId((activeStep as any).branch_id);
-        }
-      } else {
-        // ALWAYS check for active steps - this handles:
-        // 1. Parallel workflows (has_parallel_paths = true)
-        // 2. Workflows where current_node_id is null
-        // 3. Workflows where the template was modified/deleted (snapshot-based)
-        const { data: activeSteps } = await supabase
-          .from('workflow_active_steps')
-          .select('id, node_id, branch_id')
-          .eq('workflow_instance_id', workflowInstanceId as string)
-          .eq('status', 'active')
-          .order('activated_at', { ascending: false })
-          .limit(1);
-
-        if (activeSteps && activeSteps.length > 0) {
-          nodeIdToLoad = (activeSteps[0] as any).node_id;
-          activeStepIdToUse = (activeSteps[0] as any).id;
-          setBranchId((activeSteps[0] as any).branch_id);
-        } else if ((instance as any).current_node_id) {
-          // Fallback to current_node_id if no active steps found
-          setBranchId(null);
-        } else {
-          // No active steps and no current_node_id - workflow may be stuck
-          setBranchId(null);
-        }
-      }
-
-      setCurrentActiveStepId(activeStepIdToUse);
-
-      // Now get the node data - prefer snapshot over live tables
-      // This ensures deleted/modified templates don't break in-progress workflows
-      let currentNodeData: any = null;
-      if (nodeIdToLoad) {
-        if (hasSnapshot) {
-          // Use snapshot data (protects against template deletion/modification)
-          currentNodeData = snapshotNodes.find((n: any) => n.id === nodeIdToLoad) || null;
-        } else {
-          // Fallback to live table for older instances without snapshot
-          const { data: nodeData } = await supabase
-            .from('workflow_nodes')
-            .select('*')
-            .eq('id', nodeIdToLoad)
-            .single();
-          currentNodeData = nodeData;
-        }
-      }
-
-      // Construct the instance with node data in the expected format
-      const instanceWithNode: any = {
-        ...(instance as any),
-        workflow_nodes: currentNodeData,
-      };
-
-      setWorkflowInstance(instanceWithNode);
-
-      // Check if form was already submitted - handles both form nodes and approval nodes
-      setExistingFormData(null); // Reset first
-      let foundExistingFormData = false; // Track if we found form data (for blocking editable form)
-      let previousFormResponses: any = null; // For pre-filling form after rejection
-
-      const isApprovalNode = currentNodeData?.node_type === 'approval';
-      const isFormNode = currentNodeData?.node_type === 'form';
-
-      if (nodeIdToLoad) {
-        let formHistoryEntry: any = null;
-
-        // Look for any form submission in the workflow history
-        // This handles: approval nodes, and any node following a form node
-        const { data: recentHistory } = await supabase
-          .from('workflow_history')
-          .select(`
-            form_response_id,
-            notes,
-            from_node_id,
-            to_node_id,
-            workflow_nodes!workflow_history_from_node_id_fkey(node_type, label)
-          `)
-          .eq('workflow_instance_id', workflowInstanceId as string)
-          .order('created_at', { ascending: false })
-          .limit(10);
-
-        // Show form data on approval nodes that received the form (directly or via parallel paths)
-        // For parallel workflows, the form may have been submitted to a different parallel branch
-        // but we still want to show it on all approval nodes that follow the form
-        if (isApprovalNode) {
-          // First, try to find a form submission directly TO this node
-          formHistoryEntry = (recentHistory as any[])?.find((entry: any) =>
-            entry.to_node_id === nodeIdToLoad &&
-            (entry.form_response_id || (entry.notes && (entry.notes as string).includes('inline_form')))
-          );
-
-          // If not found, look for form submissions FROM a form node
-          // This handles parallel approval nodes that all follow the same form
-          if (!formHistoryEntry) {
-            formHistoryEntry = (recentHistory as any[])?.find((entry: any) =>
-              (entry.workflow_nodes as any)?.node_type === 'form' &&
-              (entry.form_response_id || (entry.notes && (entry.notes as string).includes('inline_form')))
-            );
-          }
-        }
-
-        // Special case: Form node after rejection - look for previous submission FROM this form node
-        // This allows the user to see and edit their previous form data after a rejection
-        if (!formHistoryEntry && isFormNode) {
-          formHistoryEntry = (recentHistory as any[])?.find((entry: any) =>
-            entry.from_node_id === nodeIdToLoad &&
-            (entry.form_response_id || (entry.notes && (entry.notes as string).includes('inline_form')))
-          );
-        }
-
-        // Load form data from history entry if found
-        // For form nodes: pre-fill editable form (revision after rejection)
-        // For non-form nodes: show as read-only
-        if (formHistoryEntry) {
-          // Check for linked form response
-          if (formHistoryEntry.form_response_id) {
-            const { data: formResponse } = await supabase
-              .from('form_responses')
-              .select(`
-                response_data,
-                form_template:form_templates(fields, name)
-              `)
-              .eq('id', formHistoryEntry.form_response_id)
-              .single();
-
-            if (formResponse) {
-              if (isFormNode) {
-                // Form node - store for pre-filling editable form
-                previousFormResponses = (formResponse as any).response_data;
-              } else {
-                // Non-form node - show as read-only
-                setExistingFormData({
-                  data: (formResponse as any).response_data,
-                  fields: ((formResponse as any).form_template as any)?.fields as any[],
-                  formName: ((formResponse as any).form_template as any)?.name as string
-                });
-                foundExistingFormData = true;
-              }
-            }
-          }
-          // Check for inline form data in notes
-          else if (formHistoryEntry.notes) {
-            try {
-              const notesData = JSON.parse(formHistoryEntry.notes as string);
-              if (notesData.type === 'inline_form' && notesData.data) {
-                if (isFormNode) {
-                  // Form node - store for pre-filling editable form
-                  previousFormResponses = notesData.data.responses || {};
-                } else {
-                  // Non-form node - show as read-only
-                  setExistingFormData({
-                    data: notesData.data.responses || {},
-                    fields: notesData.data.fields,
-                    formName: notesData.data.formName
-                  });
-                  foundExistingFormData = true;
-                }
-              }
-            } catch {
-              // Notes is not JSON, ignore
-            }
-          }
-        }
-      }
-
-      // Check for form data - either from form_template_id or inline in settings
-      // Use the node data we already loaded
-      // IMPORTANT: If form data was already submitted at a previous step, DON'T show editable form
-      // This handles: approval nodes, and any other node type following a form node
-      // EXCEPTION: Form nodes should show editable form even if there's previous data (revision case)
-      let formLoaded = false;
-
-      // Skip form template loading if:
-      // 1. This is an approval node (should only show approve/reject buttons)
-      // 2. OR form data was already submitted AND this is NOT a form node (show read-only instead)
-      // Form nodes should always show editable form (pre-filled if revising)
-      if (isApprovalNode || (foundExistingFormData && !isFormNode)) {
-        setFormTemplate(null);
-        setFormData({});
-        formLoaded = false; // No editable form - show read-only data instead
-      }
-      // First, check if there's an inline form in the node settings (workflow builder stores forms here)
-      else if (currentNodeData?.settings?.formFields && (currentNodeData.settings.formFields as any[]).length > 0) {
-        // Build a form template from the inline settings
-        const inlineTemplate: FormTemplate = {
-          id: `inline-${currentNodeData.id}`,
-          name: (currentNodeData.settings.formName as string) || currentNodeData.label || 'Form',
-          description: (currentNodeData.settings.formDescription as string) || null,
-          fields: (currentNodeData.settings.formFields as any[]).map((field: any) => ({
-            id: field.id,
-            type: field.type === 'select' ? 'dropdown' : field.type, // Map 'select' to 'dropdown'
-            label: field.label,
-            required: field.required || false,
-            placeholder: field.placeholder || '',
-            options: field.options || [],
-            defaultValue: field.defaultValue,
-            validation: field.validation,
-            conditional: field.conditional,
-          })),
-        };
-
-        setFormTemplate(inlineTemplate);
-        formLoaded = true;
-
-        // Initialize form data with default values
+      // The step's editable form: pre-filled after a rejection, or from an auto-saved draft
+      if (d.formTemplate) {
+        setFormTemplate(d.formTemplate);
         const initialData: Record<string, any> = {};
-        for (const field of inlineTemplate.fields) {
+        for (const field of (d.formTemplate.fields as FormField[]) || []) {
           if (field.defaultValue !== undefined) {
             initialData[field.id] = field.defaultValue;
           } else if (field.type === 'checkbox') {
@@ -864,12 +375,9 @@ export function WorkflowProgressButton({
             initialData[field.id] = '';
           }
         }
-
-        // If we have previous form responses (revision after rejection), pre-fill the form
-        if (previousFormResponses) {
-          setFormData({ ...initialData, ...previousFormResponses });
+        if (d.previousFormResponses) {
+          setFormData({ ...initialData, ...d.previousFormResponses });
         } else {
-          // Check for auto-saved draft data
           const savedDraft = loadSavedFormData();
           if (savedDraft?.formData && Object.keys(savedDraft.formData).length > 0) {
             setFormData({ ...initialData, ...savedDraft.formData });
@@ -881,246 +389,28 @@ export function WorkflowProgressButton({
             setFormData(initialData);
           }
         }
-      }
-      // If no inline form, check for a linked form template
-      else if (currentNodeData?.form_template_id) {
-        const { data: template, error: templateError } = await supabase
-          .from('form_templates')
-          .select('*')
-          .eq('id', currentNodeData.form_template_id)
-          .single();
-
-        if (template && !templateError) {
-          setFormTemplate(template as any);
-          formLoaded = true;
-
-          // Initialize form data with default values
-          const initialData: Record<string, any> = {};
-          for (const field of ((template as any).fields as FormField[]) || []) {
-            if (field.defaultValue !== undefined) {
-              initialData[field.id] = field.defaultValue;
-            } else if (field.type === 'checkbox') {
-              initialData[field.id] = false;
-            } else if (field.type === 'multiselect') {
-              initialData[field.id] = [];
-            } else {
-              initialData[field.id] = '';
-            }
-          }
-
-          // If we have previous form responses (revision after rejection), pre-fill the form
-          if (previousFormResponses) {
-            setFormData({ ...initialData, ...previousFormResponses });
-          } else {
-            // Check for auto-saved draft data
-            const savedDraft = loadSavedFormData();
-            if (savedDraft?.formData && Object.keys(savedDraft.formData).length > 0) {
-              setFormData({ ...initialData, ...savedDraft.formData });
-              if (savedDraft.decision) setDecision(savedDraft.decision);
-              if (savedDraft.feedback) setFeedback(savedDraft.feedback);
-              if (savedDraft.selectedUserId) setSelectedUserId(savedDraft.selectedUserId);
-              if (savedDraft.selectedUserPerNode) setSelectedUserPerNode(savedDraft.selectedUserPerNode);
-            } else {
-              setFormData(initialData);
-            }
-          }
-        }
-      }
-
-      // Clear form state if no form found
-      if (!formLoaded) {
+      } else {
         setFormTemplate(null);
         setFormData({});
       }
 
-      // Get next node(s) preview - handle both single and parallel branches
-      // Use snapshot data for connections and nodes to ensure template changes don't break workflows
-      const nodeIdForConnections = nodeIdToLoad || (instance as any).current_node_id;
-      if (nodeIdForConnections) {
-        // Get connections - prefer snapshot over live tables
-        let connections: any[] = [];
-        if (hasSnapshot) {
-          // Use snapshot connections
-          connections = snapshotConnections.filter(
-            (c: any) => c.from_node_id === nodeIdForConnections
-          );
-        } else {
-          // Fallback to live table
-          const { data: liveConnections } = await supabase
-            .from('workflow_connections')
-            .select('to_node_id, condition')
-            .eq('workflow_template_id', (instance as any).workflow_template_id)
-            .eq('from_node_id', nodeIdForConnections);
-          connections = (liveConnections as any[]) || [];
-        }
-
-        if (connections.length > 0) {
-          // Filter out decision-based connections (those are for approval routing, not parallel branches)
-          const parallelConnections = connections.filter(
-            (c: any) => !(c.condition as any)?.decision && !(c.condition as any)?.conditionValue
-          );
-
-          // Get all next node IDs
-          const nextNodeIds = parallelConnections.map((c: any) => c.to_node_id);
-
-          // Get all next nodes - prefer snapshot over live tables
-          let allNextNodes: any[] = [];
-          if (hasSnapshot) {
-            // Use snapshot nodes
-            allNextNodes = snapshotNodes.filter((n: any) => nextNodeIds.includes(n.id));
-          } else {
-            // Fallback to live table
-            const { data: liveNextNodes } = await supabase
-              .from('workflow_nodes')
-              .select('*')
-              .in('id', nextNodeIds);
-            allNextNodes = (liveNextNodes as any[]) || [];
-          }
-
-          if (allNextNodes.length > 0) {
-            // Set legacy single node for backward compatibility
-            setNextNode(allNextNodes[0] as any);
-            // Set all next nodes for parallel support
-            setNextNodes(allNextNodes as any);
-
-            // For parallel branches, fetch users for EACH next node
-            if (allNextNodes.length > 1) {
-              const usersMap: Record<string, User[]> = {};
-
-              for (const node of allNextNodes) {
-                const users = await loadNodeUsers(supabase, node);
-                if (users) usersMap[(node as any).id] = users;
-              }
-
-              setUsersPerNode(usersMap);
-              setSelectedUserPerNode({}); // Reset selections
-            } else {
-              // Single next node - use legacy availableUsers
-              const users = await loadNodeUsers(supabase, allNextNodes[0]);
-              if (users) setAvailableUsers(users);
-            }
-          }
+      // Next step(s) preview, and the people who can be picked for them
+      if (d.nextNodes.length > 0) {
+        setNextNode(d.nextNodes[0] as any);
+        setNextNodes(d.nextNodes as any);
+        if (d.usersPerNode) {
+          setUsersPerNode(d.usersPerNode);
+          setSelectedUserPerNode({}); // Reset selections
+        } else if (d.availableUsers) {
+          setAvailableUsers(d.availableUsers);
         }
       }
 
-      // Load open project issues to help inform decision-making
-      setLoadingIssues(true);
-      try {
-        const { data: issues } = await supabase
-          .from('project_issues')
-          .select('id, content, status, created_at')
-          .eq('project_id', projectId)
-          .eq('status', 'open')
-          .order('created_at', { ascending: false })
-          .limit(5);
-
-        setProjectIssues(issues || []);
-      } catch (issuesError) {
-        setProjectIssues([]);
-      } finally {
-        setLoadingIssues(false);
-      }
-
-      // Load parallel approvers (other users approving in parallel branches)
-      // This helps users know who else is reviewing the same project
-      try {
-        const currentStepBranchId = branchId || 'main';
-
-        // Only check for parallel if we're at an approval node with a branch
-        if (currentNodeData?.node_type === 'approval' && currentStepBranchId !== 'main') {
-          // Extract the parent branch prefix (e.g., "main-0" from "main-0_1234567890")
-          // Parallel branches share the same parent pattern
-          const branchParts = currentStepBranchId.split('_');
-          const branchPrefix = branchParts[0]; // e.g., "main-0" or "main-1"
-          const flowId = branchParts[1]; // e.g., "1234567890"
-
-          if (branchPrefix && flowId) {
-            // Get the base branch (remove the index) - e.g., "main" from "main-0"
-            const baseBranchMatch = branchPrefix.match(/^(.+)-\d+$/);
-            const baseBranch = baseBranchMatch ? baseBranchMatch[1] : branchPrefix;
-
-            // Find other active steps from the same parallel fork (same base branch and flow ID)
-            const { data: siblingSteps } = await supabase
-              .from('workflow_active_steps')
-              .select(`
-                id,
-                node_id,
-                branch_id,
-                status,
-                assigned_user_id,
-                workflow_nodes!inner(id, label, node_type)
-              `)
-              .eq('workflow_instance_id', workflowInstanceId as string)
-              .neq('id', activeStepIdToUse || '')
-              .in('status', ['active', 'completed', 'waiting']);
-
-            // Filter to only parallel siblings (same base branch, same flow ID, different index)
-            const parallelSiblings = ((siblingSteps as any[]) || []).filter((step: any) => {
-              const stepBranchParts = (step.branch_id as string).split('_');
-              const stepPrefix = stepBranchParts[0];
-              const stepFlowId = stepBranchParts[1];
-
-              // Check if from same parallel fork
-              if (stepFlowId !== flowId) return false;
-
-              // Check if same base branch but different index
-              const stepBaseBranchMatch = stepPrefix.match(/^(.+)-\d+$/);
-              const stepBaseBranch = stepBaseBranchMatch ? stepBaseBranchMatch[1] : stepPrefix;
-
-              return stepBaseBranch === baseBranch && stepPrefix !== branchPrefix;
-            });
-
-            if (parallelSiblings.length > 0) {
-              setIsParallelApproval(true);
-
-              // Get user info and approval status for each sibling
-              const approverList = await Promise.all(
-                parallelSiblings.map(async (step: any) => {
-                  // Get user info if assigned
-                  let userName = 'Unassigned';
-                  if (step.assigned_user_id) {
-                    const { data: userData } = await supabase
-                      .from('user_profiles')
-                      .select('name')
-                      .eq('id', step.assigned_user_id as string)
-                      .maybeSingle();
-                    userName = (userData as any)?.name || 'Unknown User';
-                  }
-
-                  // Check for approval decision
-                  const { data: approval } = await supabase
-                    .from('workflow_approvals')
-                    .select('decision')
-                    .eq('workflow_instance_id', workflowInstanceId as string)
-                    .eq('node_id', step.node_id as string)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                  return {
-                    id: step.id as string,
-                    userName,
-                    nodeName: (step.workflow_nodes as any)?.label || 'Unknown',
-                    completed: step.status === 'completed',
-                    decision: (approval as any)?.decision || null,
-                  };
-                })
-              );
-
-              setParallelApprovers(approverList);
-            } else {
-              setIsParallelApproval(false);
-              setParallelApprovers([]);
-            }
-          }
-        } else {
-          setIsParallelApproval(false);
-          setParallelApprovers([]);
-        }
-      } catch (parallelError) {
-        setIsParallelApproval(false);
-        setParallelApprovers([]);
-      }
+      // Open project issues, and others approving in parallel
+      setProjectIssues(d.projectIssues || []);
+      setLoadingIssues(false);
+      setIsParallelApproval(!!d.parallelApprovers);
+      setParallelApprovers(d.parallelApprovers || []);
     } catch (error: unknown) {
       // Error handled silently
     } finally {

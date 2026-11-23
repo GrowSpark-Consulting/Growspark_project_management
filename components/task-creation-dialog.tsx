@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { accountService } from '@/lib/account-service';
-import { createClientSupabase } from '@/lib/supabase';
+import { newProjectOptions, createProjectFromDialog, updateProjectBasics } from '@/lib/client-queries';
 
 import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
@@ -144,18 +144,10 @@ export default function TaskCreationDialog({
 
   const loadData = async () => {
     try {
-      const supabase = createClientSupabase() as any;
-      if (!supabase) return;
-
-      // Load workflows
-      const { data: workflowsData, error: workflowsError } = await supabase
-        .from('workflow_templates')
-        .select('id, name, description')
-        .eq('is_active', true)
-        .order('name');
-
-      if (!workflowsError) {
-        setWorkflows(workflowsData || []);
+      // Active workflows (runs on the server as the user)
+      const { data: options } = await newProjectOptions();
+      if (options?.workflows) {
+        setWorkflows(options.workflows);
       }
 
       // Stakeholder auto-selection removed - workflow handles assignment
@@ -210,39 +202,19 @@ export default function TaskCreationDialog({
     setLoading(true);
 
     try {
-      const supabaseClient = createClientSupabase();
-      if (!supabaseClient) {
-        toast.error('Database connection failed.');
-        return;
-      }
-      const supabase = supabaseClient as any;
-
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-
-      if (!authUser) {
-        toast.error('You must be logged in to create or edit a project.');
-        return;
-      }
-
       let project: Record<string, unknown>;
 
       if (editMode && existingProject) {
         // UPDATE MODE - Status is managed by workflows, not editable here
-        const { data: updatedProject, error: projectError } = await supabase
-          .from('projects')
-          .update({
-            name: formData.name,
-            // Status is managed by workflows - don't update it here
-            priority: formData.priority,
-            start_date: formData.start_date,
-            end_date: formData.end_date,
-            estimated_hours: formData.estimated_hours ? parseInt(formData.estimated_hours) : null,
-            updated_at: new Date().toISOString(),
-            // assigned_user_id not updated here - workflow handles assignment changes
-          } as never)
-          .eq('id', existingProject.id as string)
-          .select()
-          .single();
+        const { data: updatedProject, error: projectError } = await updateProjectBasics(existingProject.id as string, {
+          name: formData.name,
+          // Status is managed by workflows - don't update it here
+          priority: formData.priority,
+          start_date: formData.start_date,
+          end_date: formData.end_date,
+          estimated_hours: formData.estimated_hours ? parseInt(formData.estimated_hours) : null,
+          // assigned_user_id not updated here - workflow handles assignment changes
+        });
 
         if (projectError) {
           toast.error('Failed to update project. Please try again.');
@@ -254,22 +226,16 @@ export default function TaskCreationDialog({
         // Assignment and stakeholder handling removed - workflow manages these through handoffs
       } else {
         // CREATE MODE - New projects always start as 'planning', workflow manages status
-        const { data: newProject, error: projectError} = await supabase
-          .from('projects')
-          .insert({
-            name: formData.name,
-            account_id: accountId,
-            status: 'planning', // Always start as planning - workflow manages status changes
-            priority: formData.priority,
-            start_date: formData.start_date,
-            end_date: formData.end_date,
-            assigned_user_id: authUser.id, // Auto-assign to creator - workflow will update as needed
-            created_by: authUser.id,
-            actual_hours: 0,
-            estimated_hours: formData.estimated_hours ? parseInt(formData.estimated_hours) : null,
-          } as never)
-          .select()
-          .single();
+        // New projects always start as 'planning'; the creator is the lead until the workflow changes it
+        const { data: newProject, error: projectError } = await createProjectFromDialog({
+          name: formData.name,
+          accountId: accountId as string,
+          priority: formData.priority,
+          startDate: formData.start_date,
+          endDate: formData.end_date,
+          estimatedHours: formData.estimated_hours ? parseInt(formData.estimated_hours) : null,
+          assignToMe: true,
+        });
 
         if (projectError) {
           toast.error('Failed to create project. Please try again.');

@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/select';
 import { PlusIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { createClientSupabase } from '@/lib/supabase';
+import { newProjectOptions, createProjectFromDialog } from '@/lib/client-queries';
 
 import { useAuth } from '@/lib/hooks/useAuth';
 import { hasPermission } from '@/lib/rbac';
@@ -124,14 +124,10 @@ export default function ProjectCreationDialog({
   useEffect(() => {
     const loadData = async () => {
       try {
-        const supabase = createClientSupabase();
-        if (!supabase) return;
-
-        // Load accounts
-        const { data: accountsData, error: accountsError } = await supabase
-          .from('accounts')
-          .select('id, name')
-          .order('name');
+        // Accounts and active workflows (runs on the server as the user)
+        const { data: options } = await newProjectOptions();
+        const accountsData = options?.accounts;
+        const accountsError = !accountsData;
 
         if (accountsError) {
           setAccountsLoadFailed(true);
@@ -143,11 +139,8 @@ export default function ProjectCreationDialog({
         }
 
         // Load workflows
-        const { data: workflowsData, error: workflowsError } = await supabase
-          .from('workflow_templates')
-          .select('id, name, description')
-          .eq('is_active', true)
-          .order('name');
+        const workflowsData = options?.workflows;
+        const workflowsError = !workflowsData;
 
         if (workflowsError) {
           toast.error('Failed to load workflows');
@@ -189,36 +182,16 @@ export default function ProjectCreationDialog({
     setLoading(true);
 
     try {
-      const supabase = createClientSupabase();
-      if (!supabase) {
-        throw new Error('Failed to create Supabase client');
-      }
-
-      // Get current user (use getUser() for server-verified auth, not getSession())
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) {
-        toast.error('You must be logged in to create a project.');
-        setLoading(false);
-        return;
-      }
-
-      // Create the project (status will be determined by workflow stage)
-      const { data: project, error: projectError } = await (supabase as any)
-        .from('projects')
-        .insert({
-          name: formData.name,
-          description: formData.description || null,
-          account_id: formData.accountId,
-          status: 'planning', // Default status, will be updated by workflow
-          priority: formData.priority,
-          start_date: formData.startDate,
-          end_date: formData.endDate,
-          estimated_hours: formData.estimatedHours ? parseInt(formData.estimatedHours) : null,
-          actual_hours: 0,
-          created_by: authUser.id,
-        })
-        .select()
-        .single();
+      // Create the project (status will be determined by workflow stage); runs on the server as the user
+      const { data: project, error: projectError } = await createProjectFromDialog({
+        name: formData.name,
+        description: formData.description || null,
+        accountId: formData.accountId,
+        priority: formData.priority,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        estimatedHours: formData.estimatedHours ? parseInt(formData.estimatedHours) : null,
+      });
 
       if (projectError) {
         toast.error('Failed to create project. Please try again.');
