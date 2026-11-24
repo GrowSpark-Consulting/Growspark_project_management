@@ -119,6 +119,16 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
 
+  // Frontend on Vercel, API on Render: when BACKEND_URL (the Render service's URL) is set at build
+  // time, every /api request is forwarded there before Vercel's own routes. The browser only talks to
+  // the Vercel origin, so the sign-in cookie, CSP and CORS stay same-origin. Unset (Render itself,
+  // local): no forwarding.
+  async rewrites() {
+    const backend = process.env.BACKEND_URL?.trim().replace(/\/$/, '');
+    if (!backend) return [];
+    return { beforeFiles: [{ source: '/api/:path*', destination: `${backend}/api/:path*` }], afterFiles: [], fallback: [] };
+  },
+
   // Security Headers
   async headers() {
     // The browser talks to Supabase directly (sign-in and some reads), so connect-src must allow

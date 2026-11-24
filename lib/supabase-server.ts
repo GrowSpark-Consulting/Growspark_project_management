@@ -1,3 +1,4 @@
+import { ensureUserProfile } from './profile-loader';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
@@ -197,12 +198,12 @@ export async function getUserProfileFromRequest(supabase: ReturnType<typeof crea
     return null;
   }
 
-  // Get user profile
-  const { data: profile, error: profileError } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+  // Get user profile (created once if missing, as the old auth.users trigger did)
+  const loadProfile = () => supabase.from('user_profiles').select('*').eq('id', user.id).single();
+  let { data: profile, error: profileError } = await loadProfile();
+  if (profileError?.code === 'PGRST116' && (await ensureUserProfile(createAdminSupabaseClient(), user))) {
+    ({ data: profile, error: profileError } = await loadProfile());
+  }
 
   if (profileError || !profile) {
     return null;

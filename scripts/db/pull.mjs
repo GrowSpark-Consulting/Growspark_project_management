@@ -1,44 +1,46 @@
 // Refresh prisma/schema.prisma from the database, then generate the client.
 //
-// Prisma has to read the `auth` schema because user_profiles.id references auth.users. Only the id of
-// auth.users is kept (and the relations to the app's own tables); Supabase's other internal auth
-// tables and enums are dropped, so app code can't query them through Prisma.
+// The schema file has one schema and no auth models: the models follow the connection's schema at run
+// time (DB_SCHEMA, see lib/db), so the same client serves `public` locally and `project` on the shared
+// database, where user_profiles has no foreign key to auth.users.
+//   - DB_SCHEMA=project (the shared-database rehearsal): pulls that schema directly.
+//   - otherwise (local Supabase, `public`): Prisma must read `auth` too because of the user_profiles ->
+//     auth.users foreign key; everything from `auth` is removed again afterwards.
 //
-// Usage: npm run db:pull   (DATABASE_URL from .env.development.local: local Docker Supabase)
+// Usage: npm run db:pull   (settings from .env.development.local, or LOCAL_ENV_FILE)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { config } from 'dotenv';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCHEMA = path.join(ROOT, 'prisma', 'schema.prisma');
-const run = (cmd) => execSync(cmd, { cwd: ROOT, stdio: 'inherit' });
+config({ path: path.join(ROOT, process.env.LOCAL_ENV_FILE || '.env.development.local'), quiet: true });
+const dbSchema = process.env.DB_SCHEMA || 'public';
+const run = (cmd, env = {}) => execSync(cmd, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, ...env } });
+const read = () => fs.readFileSync(SCHEMA, 'utf8').replace(/\r\n/g, '\n');
 
-run('npx prisma db pull');
-
-const text = fs.readFileSync(SCHEMA, 'utf8').replace(/\r\n/g, '\n');
-// Split into top-level blocks (model / enum / view / generator / datasource) and the text between them
-const parts = text.split(/\n(?=(?:\/\/\/[^\n]*\n)*(?:model|enum|view|generator|datasource) \w+ \{)/);
-const isAuth = (block) => /\n\s*@@schema\("auth"\)/.test(block);
-const nameOf = (block) => block.match(/(?:model|enum|view) (\w+) \{/)?.[1];
-
-const kept = parts.filter((b) => !isAuth(b) || nameOf(b) === 'users');
-const appModels = new Set(kept.filter((b) => !isAuth(b)).map(nameOf).filter(Boolean));
-
-const pruned = kept.map((block) => {
-  if (!isAuth(block)) return block;
-  // auth.users: keep the id, relations to the app's own models, and the schema attribute
-  const lines = block.split('\n').filter((line) => {
+if (dbSchema !== 'public') {
+  const url = new URL(process.env.DATABASE_URL);
+  url.searchParams.set('schema', dbSchema);
+  run('npx prisma db pull', { DATABASE_URL: url.toString() });
+} else {
+  // Let Prisma read auth for the cross-schema foreign key, just for the pull
+  fs.writeFileSync(SCHEMA, read().replace(/datasource db \{\n(\s*provider\s*=\s*"postgresql"\n)\}/, 'datasource db {\n$1  schemas  = ["auth", "public"]\n}'));
+  run('npx prisma db pull');
+  const parts = read().split(/\n(?=(?:\/\/\/[^\n]*\n)*(?:model|enum|view|generator|datasource) \w+ \{)/);
+  const isAuth = (block) => /\n\s*@@schema\("auth"\)/.test(block);
+  const authNames = new Set(parts.filter(isAuth).map((b) => b.match(/(?:model|enum|view) (\w+) \{/)?.[1]).filter(Boolean));
+  const kept = parts.filter((b) => !isAuth(b)).map((block) => block.split('\n').filter((line) => {
     const t = line.trim();
-    if (t.startsWith('model ') || t === '}' || t === '@@schema("auth")') return true;
-    if (t.startsWith('///') || t.startsWith('@@') || t === '') return false;
-    const [field, type = ''] = t.split(/\s+/);
-    return field === 'id' || appModels.has(type.replace(/[?[\]]/g, ''));
-  });
-  return lines.join('\n');
-});
+    if (/^@@schema\(/.test(t) || /^schemas\s*=/.test(t)) return false;
+    const type = (t.split(/\s+/)[1] || '').replace(/[?[\]]/g, '');
+    return !authNames.has(type); // relation fields to auth models
+  }).join('\n'));
+  fs.writeFileSync(SCHEMA, kept.join('\n'));
+}
 
-fs.writeFileSync(SCHEMA, pruned.join('\n'));
 run('npx prisma format');
 run('npx prisma generate');
-console.log(`Kept ${appModels.size} app models and auth.users (id only).`);
+console.log(`Pulled schema "${dbSchema}" into prisma/schema.prisma (one schema, no auth models).`);

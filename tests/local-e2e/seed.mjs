@@ -53,6 +53,12 @@ export async function seed({ quiet = false } = {}) {
   const ids = {};
   for (const [key, p] of Object.entries(PERSONAS)) ids[key] = await ensureUser(admin, p, list.users);
 
+  // Every persona has its plain profile (normally made by the auth trigger; the shared-database
+  // rehearsal has no trigger, and accounts may already exist from an earlier run)
+  await admin.from('user_profiles').upsert(
+    Object.entries(PERSONAS).map(([key, p]) => ({ id: ids[key], email: p.email, name: p.name })),
+    { onConflict: 'id', ignoreDuplicates: true });
+
   // Wait for the profile trigger
   for (let i = 0; i < 20; i++) {
     const { data } = await admin.from('user_profiles').select('id').in('id', Object.values(ids));

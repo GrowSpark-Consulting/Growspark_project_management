@@ -10,7 +10,11 @@ import path from 'node:path';
 import { Client } from 'pg';
 import { withUser, withSystem, db, userRole } from '@/lib/db';
 
-config({ path: path.resolve(__dirname, '..', '..', '.env.development.local'), quiet: true });
+config({ path: path.resolve(__dirname, '..', '..', process.env.LOCAL_ENV_FILE || '.env.development.local'), quiet: true });
+// On the shared database the user comes from project.current_user_id() / request_role(), not auth.*
+const SHARED = (process.env.DB_SCHEMA || 'public') !== 'public';
+const UID = SHARED ? 'project.current_user_id()' : 'auth.uid()';
+const ROLE = SHARED ? 'project.request_role()' : 'auth.role()';
 const url = process.env.DATABASE_URL;
 const local = !!url && ['127.0.0.1', 'localhost'].includes(new URL(url).hostname);
 
@@ -36,9 +40,9 @@ describe.skipIf(!reachable)('server-side database layer (lib/db)', () => {
 
   it('runs as the user: auth.uid() and auth.role() see the user, and the role cannot bypass row-level security', async () => {
     const id = randomUUID();
-    const [who] = await withUser(id, (tx) => tx.$queryRaw<Who[]>`
-      select auth.uid()::text as uid, auth.role() as role, current_user::text as current_user,
-             (select rolbypassrls from pg_roles where rolname = current_user) as bypass`);
+    const [who] = await withUser(id, (tx) => tx.$queryRawUnsafe<Who[]>(
+      `select ${UID}::text as uid, ${ROLE} as role, current_user::text as current_user,
+             (select rolbypassrls from pg_roles where rolname = current_user) as bypass`));
     expect(who).toEqual({ uid: id, role: 'authenticated', current_user: userRole(), bypass: false });
   });
 
@@ -63,7 +67,7 @@ describe.skipIf(!reachable)('server-side database layer (lib/db)', () => {
   it('keeps concurrent users apart', async () => {
     const ids = Array.from({ length: 6 }, () => randomUUID());
     const seen = await Promise.all(ids.map((id) =>
-      withUser(id, async (tx) => (await tx.$queryRaw<{ uid: string }[]>`select auth.uid()::text as uid from pg_sleep(0.05)`)[0].uid)));
+      withUser(id, async (tx) => (await tx.$queryRawUnsafe<{ uid: string }[]>(`select ${UID}::text as uid from pg_sleep(0.05)`))[0].uid)));
     expect(seen).toEqual(ids);
   });
 

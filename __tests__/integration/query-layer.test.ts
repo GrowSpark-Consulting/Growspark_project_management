@@ -19,7 +19,9 @@ import { queryClient, type Runner } from '@/lib/db/query';
 import { db } from '@/lib/db';
 
 const ROOT = path.resolve(__dirname, '..', '..');
-config({ path: path.join(ROOT, '.env.development.local'), quiet: true });
+// LOCAL_ENV_FILE=.env.rehearsal.local runs it against the shared-database rehearsal (project schema)
+config({ path: path.join(ROOT, process.env.LOCAL_ENV_FILE || '.env.development.local'), quiet: true });
+const SCHEMA = process.env.DB_SCHEMA || 'public';
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY || '';
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -35,7 +37,7 @@ const WEBSITE = '0e2e0000-0000-4000-8000-00000000b001';
 let ready = false;
 if (local(URL_) && local(process.env.DATABASE_URL) && SERVICE) {
   try {
-    const admin = createClient(URL_, SERVICE, { auth: { persistSession: false } });
+    const admin = createClient(URL_, SERVICE, { auth: { persistSession: false }, db: { schema: SCHEMA } });
     const { data } = await admin.from('user_profiles').select('id').eq('email', EMAIL.pm).maybeSingle();
     ready = !!data;
   } catch {
@@ -77,14 +79,14 @@ function codebaseSelects(): { table: string; select: string; where: string }[] {
 
 describe.skipIf(!ready)('query layer matches the Supabase Data API', () => {
   beforeAll(async () => {
-    as.system = { rest: createClient(URL_, SERVICE, { auth: { persistSession: false } }), layer: queryClient({ kind: 'system' }) };
+    as.system = { rest: createClient(URL_, SERVICE, { auth: { persistSession: false }, db: { schema: SCHEMA } }), layer: queryClient({ kind: 'system' }) };
     const anonRunner: Runner = { kind: 'user', userId: async () => null };
-    as.anon = { rest: createClient(URL_, ANON, { auth: { persistSession: false } }), layer: queryClient(anonRunner) };
+    as.anon = { rest: createClient(URL_, ANON, { auth: { persistSession: false }, db: { schema: SCHEMA } }), layer: queryClient(anonRunner) };
     for (const who of PERSONAS) {
       const auth = createClient(URL_, ANON, { auth: { persistSession: false } });
       const { data, error } = await auth.auth.signInWithPassword({ email: EMAIL[who], password: PASSWORD });
       if (error || !data.session) throw new Error(`sign-in ${who}: ${error?.message}`);
-      const rest = createClient(URL_, ANON, { auth: { persistSession: false }, global: { headers: { Authorization: `Bearer ${data.session.access_token}` } } });
+      const rest = createClient(URL_, ANON, { auth: { persistSession: false }, global: { headers: { Authorization: `Bearer ${data.session.access_token}` } }, db: { schema: SCHEMA } });
       const id = data.user.id;
       as[who] = { rest, layer: queryClient({ kind: 'user', userId: async () => id }), id };
     }
@@ -186,6 +188,14 @@ describe.skipIf(!ready)('query layer matches the Supabase Data API', () => {
     expect(outcome(ub)).toEqual(outcome(ua));
     expect(ub.data).toEqual([]);
   }, 60_000);
+
+  it('calls a function that returns nothing (void), as the Data API does', async () => {
+    // Registration's complete_workspace_registration is void; Prisma cannot read a void column back
+    const [rest, layer] = await Promise.all([as.system.rest.rpc('auto_clock_out_stale_sessions'), as.system.layer.rpc('auto_clock_out_stale_sessions')]);
+    expect(rest.error).toBeNull();
+    expect(layer.error).toBeNull();
+    expect(layer.data).toBeNull();
+  });
 
   it('refuses arbitrary SQL through exec_sql', async () => {
     const r = await as.system.layer.rpc('exec_sql', { query: 'select 1' });

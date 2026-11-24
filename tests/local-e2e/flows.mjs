@@ -346,7 +346,8 @@ async function main() {
     report.status('DOC-outsider-upload', await upload('outsider', `/api/projects/${IDS.website}/files`, 'x.txt', 'x'), [403, 404]);
     const dl = await api('emp1', 'GET', `/api/files/${file.id}`);
     const loc = dl.headers.get('location') || '';
-    report.record('DOC-download', dl.status === 302 && /\/storage\/v1\/object\/sign\//.test(loc), `status ${dl.status}, signed URL=${!!loc}`);
+    // A signed link: Supabase Storage (/storage/v1/object/sign/) or an S3/R2 presigned URL (X-Amz-Signature)
+    report.record('DOC-download', dl.status === 302 && (/\/storage\/v1\/object\/sign\//.test(loc) || /[?&]X-Amz-Signature=/.test(loc)), `status ${dl.status}, signed URL=${!!loc}`);
     if (loc) {
       const body = await fetch(loc.startsWith('http') ? loc : env.url + loc).then((r) => r.text()).catch((e) => `ERR ${e.message}`);
       report.record('DOC-download-content', body === content, 'downloaded bytes match the upload');

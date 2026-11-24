@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './lib.mjs';
 
-const TARGET = { host: '127.0.0.1', port: 54321 };
+const TARGET = { host: '127.0.0.1', port: Number(process.env.DATA_API_OFF_TARGET_PORT) || 54321 };
 const PORT = Number(process.env.DATA_API_OFF_PORT) || 55321;
 const LOG = path.join(ROOT, 'tests', 'local-e2e', 'output', 'data-api-off-blocked.jsonl');
 fs.mkdirSync(path.dirname(LOG), { recursive: true });

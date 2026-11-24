@@ -5,6 +5,24 @@
 import { logger } from './debug-logger';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * Make sure a signed-in account has its profile row, as the old `on_auth_user_created` trigger on
+ * auth.users did (the shared database has no trigger there: sign-in may come from another Supabase
+ * project). Same row as the trigger made: id, email, and the name from sign-up (else the email); an
+ * existing profile is never changed. Registration and both invitation flows create the profile
+ * themselves; this covers self sign-up and accounts that already existed in Auth.
+ * `admin` is the server-role client (the row belongs to the user, who has no profile yet to pass RLS).
+ */
+export async function ensureUserProfile(admin: any, user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> | null }): Promise<boolean> {
+  if (!admin || !user?.id || !user.email) return false;
+  const metaName = typeof user.user_metadata?.name === 'string' ? user.user_metadata.name.trim() : '';
+  const { error } = await admin
+    .from('user_profiles')
+    .upsert({ id: user.id, email: user.email, name: metaName || user.email }, { onConflict: 'id', ignoreDuplicates: true });
+  if (error) logger.error('Could not create the missing profile', { userId: user.id, code: error.code });
+  return !error;
+}
 /**
  * OPTIMIZED: Get user profile with roles in a SINGLE query
  * This combines what was previously 2-3 separate queries into one

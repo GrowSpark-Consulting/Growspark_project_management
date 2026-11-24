@@ -12,11 +12,15 @@ export const ROOT = path.resolve(here, '..', '..');
 export const PASSWORD = 'Test1234!';
 export const COOKIE_NAME = 'sb-project-management-auth';
 
-/** Read KEY=VALUE lines from .env.development.local (local Docker keys only). */
+/**
+ * Read KEY=VALUE lines from .env.development.local (local Docker keys only), or from the file named by
+ * LOCAL_ENV_FILE (the shared-database rehearsal uses .env.rehearsal.local, see scripts/shared-db).
+ */
 export function loadEnv() {
-  const file = path.join(ROOT, '.env.development.local');
+  const name = process.env.LOCAL_ENV_FILE || '.env.development.local';
+  const file = path.join(ROOT, name);
   if (!fs.existsSync(file)) {
-    throw new Error('Missing .env.development.local. Start local Supabase and create it first (see tests/local-e2e/README.md).');
+    throw new Error(`Missing ${name}. Start local Supabase and create it first (see tests/local-e2e/README.md).`);
   }
   const env = {};
   for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
@@ -31,11 +35,40 @@ export function loadEnv() {
   if (!['127.0.0.1', 'localhost'].includes(host)) {
     throw new Error(`Refusing to run: Supabase URL ${url} is not local. These tests write data and must only run against local Docker.`);
   }
-  return { url, anon, service, appUrl: (env.E2E_APP_URL || 'http://localhost:3100').replace(/\/$/, ''), cronSecret: env.CRON_SECRET || null };
+  return {
+    url, anon, service, appUrl: (env.E2E_APP_URL || 'http://localhost:3100').replace(/\/$/, ''), cronSecret: env.CRON_SECRET || null,
+    // The app's tables live in DB_SCHEMA (project in the shared-database rehearsal); the test clients read them there
+    schema: env.DB_SCHEMA || 'public',
+    rehearsal: env.REHEARSAL === '1',
+  };
 }
 
 export function adminClient(env) {
-  return createClient(env.url, env.service, { auth: { autoRefreshToken: false, persistSession: false } });
+  const client = createClient(env.url, env.service, { auth: { autoRefreshToken: false, persistSession: false }, db: { schema: env.schema || 'public' } });
+  if ((env.schema || 'public') !== 'public') {
+    // Shared-database rehearsal: the app's tables are not in the Auth database, so the old auth.users
+    // trigger (profile on sign-up) and foreign-key cascade (profile gone with the account) do not exist.
+    // Tests that create accounts directly through Auth get the same plain profile and cleanup here; the
+    // app itself creates profiles in its own flows (see lib/profile-loader.ts).
+    const authAdmin = client.auth.admin;
+    const createUser = authAdmin.createUser.bind(authAdmin);
+    const deleteUser = authAdmin.deleteUser.bind(authAdmin);
+    authAdmin.createUser = async (attrs) => {
+      const res = await createUser(attrs);
+      const u = res.data?.user;
+      if (u) {
+        const name = (typeof u.user_metadata?.name === 'string' && u.user_metadata.name.trim()) || u.email;
+        await client.from('user_profiles').upsert({ id: u.id, email: u.email, name }, { onConflict: 'id', ignoreDuplicates: true });
+      }
+      return res;
+    };
+    authAdmin.deleteUser = async (id, ...rest) => {
+      const res = await deleteUser(id, ...rest);
+      if (!res.error) await client.from('user_profiles').delete().eq('id', id);
+      return res;
+    };
+  }
+  return client;
 }
 
 /** Playwright's Chromium headless shell (or CHROME_PATH). */
@@ -59,6 +92,13 @@ export const isTestEmail = (email) => /@example\.com$/i.test(email || '');
  * registered yourself in the browser) unless the command line has --wipe-local-accounts.
  */
 export async function resetLocalDb(env, { log = console.log } = {}) {
+  if (env.rehearsal) {
+    // The shared-database rehearsal stack is disposable: rebuild it (mirror + roles + baseline), never
+    // the developer's own local database
+    log('Rebuilding the rehearsal database (scripts/shared-db/rehearse.mjs)…');
+    execSync('node scripts/shared-db/rehearse.mjs --rebuild', { cwd: ROOT, stdio: 'ignore' });
+    return;
+  }
   const admin = adminClient(env);
   const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
   if (error) throw new Error(`Could not list local accounts before the reset: ${error.message}`);
@@ -118,6 +158,7 @@ export async function signIn(env, email, password = PASSWORD) {
   const db = createClient(env.url, env.anon, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { headers: { Authorization: `Bearer ${data.session.access_token}` } },
+    db: { schema: env.schema || 'public' },
   });
   return { email, userId: data.user.id, cookie, db, session: data.session };
 }

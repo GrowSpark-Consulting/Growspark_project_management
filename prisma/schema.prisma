@@ -9,65 +9,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["auth", "public"]
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-model users {
-  id            String         @id @db.Uuid
-  user_profiles user_profiles?
-
-  @@schema("auth")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model account_kanban_configs {
-  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   account_id String   @unique @db.Uuid
   columns    Json     @default("[]")
   created_at DateTime @default(now()) @db.Timestamptz(6)
@@ -75,12 +21,11 @@ model account_kanban_configs {
   accounts   accounts @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([account_id], map: "idx_account_kanban_configs_account_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model account_members {
-  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id       String        @db.Uuid
   account_id    String        @db.Uuid
   created_at    DateTime      @default(now()) @db.Timestamptz(6)
@@ -90,13 +35,12 @@ model account_members {
   @@unique([user_id, account_id])
   @@index([account_id], map: "idx_account_members_account_id")
   @@index([user_id], map: "idx_account_members_user_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model accounts {
-  id                                                       String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                       String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                                                     String                      @unique
   description                                              String?
   primary_contact_email                                    String?
@@ -115,7 +59,6 @@ model accounts {
 
   @@index([account_manager_id], map: "idx_accounts_account_manager_id")
   @@index([status], map: "idx_accounts_status")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -140,7 +83,6 @@ model app_settings {
   onboarding          Json           @default("{}")
   user_profiles       user_profiles? @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
 
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -158,13 +100,12 @@ model audit_log {
   @@index([actor_id, created_at(sort: Desc)], map: "idx_audit_log_actor")
   @@index([created_at(sort: Desc)], map: "idx_audit_log_created")
   @@index([project_id, created_at(sort: Desc)], map: "idx_audit_log_project")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model client_feedback {
-  id                     String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id             String            @db.Uuid
   submitted_at           DateTime          @default(now()) @db.Timestamptz(6)
   client_user_id         String?           @db.Uuid
@@ -179,13 +120,12 @@ model client_feedback {
   workflow_history       workflow_history? @relation(fields: [workflow_history_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([project_id], map: "idx_client_feedback_project_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model client_portal_invitations {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   account_id    String         @db.Uuid
   email         String
   invited_by    String?        @db.Uuid
@@ -200,12 +140,11 @@ model client_portal_invitations {
 
   @@index([account_id], map: "idx_client_portal_invitations_account_id")
   @@index([email], map: "idx_client_portal_invitations_email")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model clock_sessions {
-  id                String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id           String         @unique(map: "idx_clock_sessions_one_active_per_user", where: raw("(is_active = true)")) @db.Uuid
   clock_in_time     DateTime       @db.Timestamptz(6)
   clock_out_time    DateTime?      @db.Timestamptz(6)
@@ -220,13 +159,12 @@ model clock_sessions {
 
   @@index([is_active], map: "idx_clock_sessions_is_active")
   @@index([user_id], map: "idx_clock_sessions_user_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model comments {
-  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id      String           @db.Uuid
   task_id         String?          @db.Uuid
   update_id       String?          @db.Uuid
@@ -247,13 +185,12 @@ model comments {
   @@index([project_id], map: "idx_comments_project")
   @@index([task_id, created_at], map: "idx_comments_task", where: raw("(task_id IS NOT NULL)"))
   @@index([update_id, created_at], map: "idx_comments_update", where: raw("(update_id IS NOT NULL)"))
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model deliverables {
-  id                                                     String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                                                   String
   description                                            String?
   project_id                                             String         @db.Uuid
@@ -281,7 +218,6 @@ model deliverables {
   @@index([project_id], map: "idx_deliverables_project_id")
   @@index([project_id, status], map: "idx_deliverables_project_status")
   @@index([status], map: "idx_deliverables_status")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -297,12 +233,11 @@ model department_members {
 
   @@unique([department_id, user_id])
   @@index([user_id])
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model departments {
-  id                 String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name               String               @unique
   description        String?
   created_at         DateTime             @default(now()) @db.Timestamptz(6)
@@ -311,12 +246,11 @@ model departments {
   roles              roles[]
   user_invitations   user_invitations[]
 
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model form_responses {
-  id                                                                    String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   form_template_id                                                      String?            @db.Uuid
   workflow_history_id                                                   String?            @db.Uuid
   submitted_by                                                          String?            @db.Uuid
@@ -329,12 +263,11 @@ model form_responses {
 
   @@index([form_template_id], map: "idx_form_responses_form_template_id")
   @@index([submitted_by], map: "idx_form_responses_submitted_by")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model form_templates {
-  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name           String           @unique
   description    String?
   schema         Json
@@ -347,13 +280,12 @@ model form_templates {
   user_profiles  user_profiles?   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   workflow_nodes workflow_nodes[]
 
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model milestones {
-  id             String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name           String
   description    String?
   date           DateTime       @db.Date
@@ -369,12 +301,11 @@ model milestones {
   projects       projects?      @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([project_id, date], map: "idx_milestones_project_date")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model newsletters {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   title         String
   content       String
   created_by    String?        @db.Uuid
@@ -385,12 +316,11 @@ model newsletters {
   user_profiles user_profiles? @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([is_published], map: "idx_newsletters_is_published")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model notifications {
-  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id       String        @db.Uuid
   title         String
   message       String
@@ -407,13 +337,12 @@ model notifications {
   @@index([read], map: "idx_notifications_read")
   @@index([user_id], map: "idx_notifications_user_id")
   @@index([user_id, read, created_at(sort: Desc)], map: "idx_notifications_user_read")
-  @@schema("public")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model onboarding_state {
-  id                 String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id            String        @unique @db.Uuid
   tutorial_completed Boolean       @default(false)
   tutorial_step      Int           @default(0)
@@ -423,14 +352,13 @@ model onboarding_state {
   updated_at         DateTime      @default(now()) @db.Timestamptz(6)
   user_profiles      user_profiles @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_assignments {
-  id                                                           String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id                                                   String          @db.Uuid
   user_id                                                      String          @db.Uuid
   role_in_project                                              String?
@@ -452,13 +380,12 @@ model project_assignments {
   @@index([source_type], map: "idx_project_assignments_source_type")
   @@index([user_id], map: "idx_project_assignments_user_id")
   @@index([workflow_node_id], map: "idx_project_assignments_workflow_node_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_files {
-  id             String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id     String         @db.Uuid
   task_id        String?        @db.Uuid
   file_name      String
@@ -476,7 +403,6 @@ model project_files {
   @@index([project_id, created_at(sort: Desc)], map: "idx_project_files_project")
   @@index([project_id], map: "idx_project_files_shared", where: raw("client_visible"))
   @@index([task_id], map: "idx_project_files_task", where: raw("(task_id IS NOT NULL)"))
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -491,13 +417,12 @@ model project_financials {
   projects      projects       @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_profiles user_profiles? @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
 
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_issues {
-  id                                                      String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                      String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id                                              String            @db.Uuid
   content                                                 String
   status                                                  String?           @default("open")
@@ -520,12 +445,11 @@ model project_issues {
   @@index([project_id], map: "idx_project_issues_project_id")
   @@index([status], map: "idx_project_issues_status")
   @@index([workflow_history_id], map: "idx_project_issues_workflow_history_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_stakeholders {
-  id                                                         String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id                                                 String         @db.Uuid
   user_id                                                    String         @db.Uuid
   role                                                       String?
@@ -537,13 +461,12 @@ model project_stakeholders {
 
   @@index([project_id], map: "idx_project_stakeholders_project_id")
   @@index([user_id], map: "idx_project_stakeholders_user_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_templates {
-  id                           String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                         String
   description                  String?
   blueprint                    Json                @default("{\"tasks\": [], \"milestones\": [], \"dependencies\": []}")
@@ -554,12 +477,11 @@ model project_templates {
   user_profiles                user_profiles?      @relation(fields: [created_by], references: [id], onUpdate: NoAction)
   workflow_templates           workflow_templates? @relation(fields: [default_workflow_template_id], references: [id], onUpdate: NoAction)
 
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model project_updates {
-  id                  String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   project_id          String            @db.Uuid
   content             String
   created_by          String?           @db.Uuid
@@ -575,13 +497,12 @@ model project_updates {
   @@index([project_id], map: "idx_project_updates_client_visible", where: raw("client_visible"))
   @@index([project_id], map: "idx_project_updates_project_id")
   @@index([workflow_history_id], map: "idx_project_updates_workflow_history_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model projects {
-  id                                                     String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                                                   String
   description                                            String?
   account_id                                             String                 @db.Uuid
@@ -627,12 +548,11 @@ model projects {
   @@index([assigned_user_id], map: "idx_projects_assigned_user_id")
   @@index([created_by], map: "idx_projects_created_by")
   @@index([status], map: "idx_projects_status")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model role_hierarchy_audit {
-  id                    String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   role_id               String         @db.Uuid
   changed_by            String?        @db.Uuid
   action                String
@@ -646,12 +566,11 @@ model role_hierarchy_audit {
   roles                 roles          @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([role_id], map: "idx_role_hierarchy_audit_role_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model roles {
-  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                 String                 @unique
   department_id        String?                @db.Uuid
   description          String?
@@ -674,13 +593,12 @@ model roles {
   @@index([department_id], map: "idx_roles_department_id")
   @@index([is_system_role], map: "idx_roles_is_system_role")
   @@index([reporting_role_id], map: "idx_roles_reporting_role_id")
-  @@schema("public")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model setup_tokens {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   token         String         @unique
   expires_at    DateTime       @db.Timestamptz(6)
   used_at       DateTime?      @db.Timestamptz(6)
@@ -688,13 +606,12 @@ model setup_tokens {
   created_at    DateTime       @default(now()) @db.Timestamptz(6)
   user_profiles user_profiles? @relation(fields: [used_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model task_activity {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   task_id       String         @db.Uuid
   project_id    String         @db.Uuid
   actor_id      String?        @db.Uuid
@@ -709,13 +626,12 @@ model task_activity {
 
   @@index([project_id, created_at(sort: Desc)], map: "idx_task_activity_project")
   @@index([task_id, created_at], map: "idx_task_activity_task")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model task_dependencies {
-  id                                                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   task_id                                           String   @db.Uuid
   depends_on_task_id                                String   @db.Uuid
   dependency_type                                   String?  @default("finish_to_start")
@@ -726,12 +642,11 @@ model task_dependencies {
   @@unique([task_id, depends_on_task_id], map: "uq_task_dependencies_pair")
   @@index([depends_on_task_id], map: "idx_task_dependencies_depends_on_task_id")
   @@index([task_id], map: "idx_task_dependencies_task_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model task_week_allocations {
-  id               String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   task_id          String         @db.Uuid
   week_start_date  DateTime       @db.Date
   allocated_hours  Decimal        @db.Decimal(5, 2)
@@ -746,13 +661,12 @@ model task_week_allocations {
   @@index([assigned_user_id], map: "idx_task_week_allocations_assigned_user_id")
   @@index([task_id], map: "idx_task_week_allocations_task_id")
   @@index([week_start_date], map: "idx_task_week_allocations_week_start_date")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model tasks {
-  id                                                            String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                            String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                                                          String
   description                                                   String?
   project_id                                                    String                  @db.Uuid
@@ -799,13 +713,12 @@ model tasks {
   @@index([project_id], map: "idx_tasks_project_id")
   @@index([reviewer_id], map: "idx_tasks_reviewer_review", where: raw("(status = 'review'::text)"))
   @@index([status], map: "idx_tasks_status")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model time_entries {
-  id                String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   task_id           String?         @db.Uuid
   user_id           String          @db.Uuid
   project_id        String          @db.Uuid
@@ -829,13 +742,12 @@ model time_entries {
   @@index([task_id], map: "idx_time_entries_task_id")
   @@index([user_id], map: "idx_time_entries_user_id")
   @@index([week_start_date], map: "idx_time_entries_week_start_date")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model timesheets {
-  id                                                  String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id                                             String         @db.Uuid
   week_start_date                                     DateTime       @db.Date
   status                                              String         @default("draft")
@@ -851,13 +763,12 @@ model timesheets {
 
   @@unique([user_id, week_start_date])
   @@index([status, week_start_date], map: "idx_timesheets_status_week")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model user_availability {
-  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id         String        @db.Uuid
   week_start_date DateTime      @db.Date
   available_hours Decimal       @default(40) @db.Decimal(5, 2)
@@ -870,13 +781,12 @@ model user_availability {
   @@unique([user_id, week_start_date])
   @@index([user_id], map: "idx_user_availability_user_id")
   @@index([week_start_date], map: "idx_user_availability_week_start_date")
-  @@schema("public")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model user_dashboard_preferences {
-  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id       String?        @unique @db.Uuid
   widget_config Json           @default("{}")
   created_at    DateTime?      @default(now()) @db.Timestamptz(6)
@@ -884,14 +794,13 @@ model user_dashboard_preferences {
   user_profiles user_profiles? @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([user_id], map: "idx_dashboard_preferences_user_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model user_invitations {
-  id                                                          String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                                                       String
   name                                                        String
   role_id                                                     String          @db.Uuid
@@ -914,7 +823,6 @@ model user_invitations {
   @@index([email], map: "idx_user_invitations_email")
   @@index([status], map: "idx_user_invitations_status")
   @@index([token], map: "idx_user_invitations_token")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -988,7 +896,6 @@ model user_profiles {
   user_dashboard_preferences                                                     user_dashboard_preferences?
   user_invitations_user_invitations_invited_byTouser_profiles                    user_invitations[]          @relation("user_invitations_invited_byTouser_profiles")
   accounts_user_profiles_client_account_idToaccounts                             accounts?                   @relation("user_profiles_client_account_idToaccounts", fields: [client_account_id], references: [id], onUpdate: NoAction)
-  users                                                                          users                       @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_invitations_user_profiles_invitation_idTouser_invitations                 user_invitations?           @relation("user_profiles_invitation_idTouser_invitations", fields: [invitation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   user_profiles                                                                  user_profiles?              @relation("user_profilesTouser_profiles", fields: [invited_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   other_user_profiles                                                            user_profiles[]             @relation("user_profilesTouser_profiles")
@@ -1005,12 +912,11 @@ model user_profiles {
   @@index([email], map: "idx_user_profiles_email")
   @@index([is_client], map: "idx_user_profiles_is_client", where: raw("(is_client = true)"))
   @@index([is_superadmin], map: "idx_user_profiles_is_superadmin")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model user_roles {
-  id                                                  String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id                                             String         @db.Uuid
   role_id                                             String         @db.Uuid
   assigned_at                                         DateTime       @default(now()) @db.Timestamptz(6)
@@ -1022,13 +928,12 @@ model user_roles {
   @@unique([user_id, role_id])
   @@index([role_id], map: "idx_user_roles_role_id")
   @@index([user_id], map: "idx_user_roles_user_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_active_steps {
-  id                   String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_instance_id String             @db.Uuid
   node_id              String             @db.Uuid
   branch_id            String
@@ -1045,13 +950,12 @@ model workflow_active_steps {
   @@index([node_id], map: "idx_workflow_active_steps_node_id")
   @@index([status], map: "idx_workflow_active_steps_status")
   @@index([workflow_instance_id], map: "idx_workflow_active_steps_workflow_instance_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_approvals {
-  id                   String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_instance_id String             @db.Uuid
   node_id              String             @db.Uuid
   approver_user_id     String             @db.Uuid
@@ -1065,12 +969,11 @@ model workflow_approvals {
   @@index([workflow_instance_id], map: "idx_workflow_approvals_instance")
   @@index([node_id], map: "idx_workflow_approvals_node")
   @@index([approver_user_id], map: "idx_workflow_approvals_user")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_connections {
-  id                                                               String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_template_id                                             String             @db.Uuid
   from_node_id                                                     String             @db.Uuid
   to_node_id                                                       String             @db.Uuid
@@ -1084,13 +987,12 @@ model workflow_connections {
   @@index([from_node_id], map: "idx_workflow_connections_from_node_id")
   @@index([to_node_id], map: "idx_workflow_connections_to_node_id")
   @@index([workflow_template_id], map: "idx_workflow_connections_workflow_template_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_history {
-  id                                                                  String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_instance_id                                                String             @db.Uuid
   from_node_id                                                        String?            @db.Uuid
   to_node_id                                                          String?            @db.Uuid
@@ -1110,13 +1012,12 @@ model workflow_history {
   workflow_instances                                                  workflow_instances @relation(fields: [workflow_instance_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([workflow_instance_id], map: "idx_workflow_history_workflow_instance_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_instances {
-  id                        String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_template_id      String?                     @db.Uuid
   project_id                String?                     @db.Uuid
   task_id                   String?                     @db.Uuid
@@ -1138,12 +1039,11 @@ model workflow_instances {
   @@index([project_id], map: "idx_workflow_instances_project_id")
   @@index([status], map: "idx_workflow_instances_status")
   @@index([workflow_template_id], map: "idx_workflow_instances_workflow_template_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_node_assignments {
-  id                                                                 String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   node_id                                                            String             @db.Uuid
   user_id                                                            String             @db.Uuid
   workflow_instance_id                                               String             @db.Uuid
@@ -1159,13 +1059,12 @@ model workflow_node_assignments {
   @@index([node_id], map: "idx_workflow_node_assignments_node_id")
   @@index([user_id], map: "idx_workflow_node_assignments_user_id")
   @@index([workflow_instance_id], map: "idx_workflow_node_assignments_workflow_instance_id")
-  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_nodes {
-  id                                                                     String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                                                                     String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workflow_template_id                                                   String                      @db.Uuid
   node_type                                                              String
   entity_id                                                              String?                     @db.Uuid
@@ -1190,12 +1089,11 @@ model workflow_nodes {
 
   @@index([node_type], map: "idx_workflow_nodes_node_type")
   @@index([workflow_template_id], map: "idx_workflow_nodes_workflow_template_id")
-  @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model workflow_templates {
-  id                   String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                 String                 @unique
   description          String?
   created_by           String?                @db.Uuid
@@ -1208,5 +1106,4 @@ model workflow_templates {
   workflow_nodes       workflow_nodes[]
   user_profiles        user_profiles?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@schema("public")
 }

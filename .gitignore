@@ -53,6 +53,12 @@ next-env.d.ts
 *.sql
 !supabase/migrations/*.sql
 !supabase/seed.sql
+# Shared-database baseline (Prisma Migrate) and its role / rollback / rehearsal scripts
+!prisma/migrations/**/*.sql
+!db/shared/**/*.sql
+# Local CLI state of the shared-database rehearsal stack
+db/shared/rehearsal/supabase/.branches/
+db/shared/rehearsal/supabase/.temp/
 PERFORMANCE_REPORT.md
 README/local-debug/
 

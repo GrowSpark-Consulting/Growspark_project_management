@@ -19,8 +19,13 @@ Project Management runs on Render as one Node web service. It connects to Postgr
 
 | Variable | Required | Value |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | The `project_app` session-pooler string: `postgresql://project_app.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:5432/postgres`. Secret |
+| `DATABASE_URL` | Yes | The `project_app` session-pooler string: `postgresql://project_app.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true`. Secret. Keep both parameters: Node's driver treats a plain `sslmode=require` as full certificate checking, which Supabase's own CA fails |
+| `BACKEND_URL` | Vercel only | The Render service's URL (`https://<service>.onrender.com`). Set before the build: Vercel then forwards every `/api` request to Render, so the browser stays on one origin. Never set it on Render |
 | `DB_USER_ROLE` | Yes, on the shared database | The role each user request runs as, so row-level security applies: `project_user` there (created at cutover); `authenticated` on a Supabase database of this app's own |
+| `DB_ANON_ROLE` | Yes, on the shared database | Signed-out requests: `project_anon` (default `anon`) |
+| `DB_SYSTEM_ROLE` | Yes, on the shared database | Server jobs: `project_system`, allowed by explicit policies (unset: the login itself, as on Supabase) |
+| `DB_SCHEMA` | Yes, on the shared database | `project`: Prisma models and the query layer use it (default `public`) |
+| `DB_STATEMENT_TIMEOUT_MS` | Recommended | Each request's statement timeout, `8000` on the shared database |
 | `DB_POOL_MAX` | No | Connections per server, default `5`. All apps and Supabase itself share the plan's limit (60 on the Free plan), so keep the total of every app's servers × `DB_POOL_MAX` well below it |
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | The Supabase project used for sign-in (Supabase Auth); which one is integration decision D4 |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY` | Yes | That project's publishable key |
@@ -36,7 +41,7 @@ Locally the same variables come from `.env.development.local` (local Docker data
 ## Before the first deploy against the shared database
 
 1. Phase 11 finished: no module uses the Supabase Data API. Done; proved with `tests/local-e2e/data-api-off-proxy.mjs`.
-2. Tables moved into the `project` schema; policies read the signed-in user from a function in `project` instead of `auth.uid()`, because `project_app` cannot use the `auth` schema there.
-3. A `project_user` role (no login, no row-level security bypass, access to `project` only) granted to `project_app`, and `DB_USER_ROLE=project_user`.
+2. Tables in the `project` schema: `prisma/migrations/20261124000000_project_baseline` (policies read the user from `project.current_user_id()` instead of `auth.uid()`, because `project_app` cannot use `auth` there), applied by `project_migrator` with `npx prisma migrate deploy`. Rehearsed locally: `npm run shared-db:rollback-test`, `npm run shared-db:security`.
+3. Roles from `db/shared/roles.sql` (run once as postgres): `project_migrator`, and `project_user` / `project_anon` / `project_system` granted to `project_app` without inheritance. Undo: `db/shared/rollback-baseline.sql`, then `db/shared/rollback-roles.sql`.
 4. A test connection from a staging service, including TLS to the pooler.
 5. Existing data inventoried (`npm run db:inventory`) and migrated, with a backup.

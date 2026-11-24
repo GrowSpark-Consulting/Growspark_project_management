@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient, createApiSupabaseClient, createAdminSupabaseClient } from './supabase-server';
+import { ensureUserProfile } from './profile-loader';
 import { UserWithRoles } from './rbac';
 import { Permission, PermissionContext } from './permissions';
 import { checkPermissionHybrid, isSuperadmin } from './permission-checker';
@@ -137,7 +138,7 @@ export async function requireAuthentication(request?: NextRequest): Promise<User
     }
 
     // Fetch user profile with roles - specify foreign keys explicitly to avoid ambiguity
-    const { data: userProfile, error: profileError } = await supabase
+    const loadProfile = () => supabase
       .from('user_profiles')
       .select(`
         *,
@@ -154,6 +155,11 @@ export async function requireAuthentication(request?: NextRequest): Promise<User
       `)
       .eq('id', user.id)
       .single();
+    let { data: userProfile, error: profileError } = await loadProfile();
+    // No profile yet (sign-in from Auth without the old auth.users trigger): create the plain one
+    if (profileError?.code === 'PGRST116' && (await ensureUserProfile(createAdminSupabaseClient(), user))) {
+      ({ data: userProfile, error: profileError } = await loadProfile());
+    }
 
     if (profileError) {
       logger.error('Error fetching user profile', {

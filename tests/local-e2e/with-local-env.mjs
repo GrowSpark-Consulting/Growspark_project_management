@@ -12,9 +12,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ROOT } from './lib.mjs';
 
-const file = path.join(ROOT, '.env.development.local');
+// LOCAL_ENV_FILE picks another local file (the shared-database rehearsal: .env.rehearsal.local)
+const envName = process.env.LOCAL_ENV_FILE || '.env.development.local';
+const file = path.join(ROOT, envName);
 if (!fs.existsSync(file)) {
-  console.error('Missing .env.development.local (see tests/local-e2e/README.md).');
+  console.error(`Missing ${envName} (see tests/local-e2e/README.md).`);
   process.exit(1);
 }
 const vars = {};

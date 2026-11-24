@@ -634,7 +634,8 @@ async function callFunction(runner: Runner, name: string, args: Record<string, u
         return JSON.parse(rows[0].j);
       }
       if (fn.rtype === 'void') {
-        await tx.$queryRawUnsafe(`select ${call}`, ...sql.params);
+        // Prisma cannot read a column of type void back, so the call's value is not selected
+        await tx.$queryRawUnsafe(`select 1 as ok from ${call} _r`, ...sql.params);
         return null;
       }
       const expr = fn.kind === 'c' ? `(select row_to_json(_r) from ${call} _r)` : `to_json(${call})`;
