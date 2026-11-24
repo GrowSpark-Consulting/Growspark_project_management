@@ -21,6 +21,7 @@ Project Management runs on Render as one Node web service. It connects to Postgr
 | --- | --- | --- |
 | `DATABASE_URL` | Render only | The `project_app` session-pooler string: `postgresql://project_app.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true`. Secret. Keep both parameters: Node's driver treats a plain `sslmode=require` as full certificate checking, which Supabase's own CA fails |
 | `BACKEND_URL` | Vercel only | The Render service's URL (`https://<service>.onrender.com`). Set before the build: Vercel then forwards every `/api` request and `/auth/callback` to Render, and its server-rendered pages load their data from Render, so the browser stays on one origin. Never set it on Render |
+| `API_ONLY` | Render only | `1`: Render answers only `/api/...` and `/auth/callback`; a page opened on the Render address is sent to `NEXT_PUBLIC_APP_URL` (the Vercel address). Unset locally |
 | `DB_USER_ROLE` | Yes, on the shared database | The role each user request runs as, so row-level security applies: `project_user` there (created at cutover); `authenticated` on a Supabase database of this app's own |
 | `DB_ANON_ROLE` | Yes, on the shared database | Signed-out requests: `project_anon` (default `anon`) |
 | `DB_SYSTEM_ROLE` | Yes, on the shared database | Server jobs: `project_system`, allowed by explicit policies (unset: the login itself, as on Supabase) |

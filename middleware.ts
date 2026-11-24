@@ -45,8 +45,25 @@ function hasAuthCookies(req: NextRequest): boolean {
   return allCookies.some(cookie => cookie.name.startsWith('sb-'));
 }
 
+/**
+ * Backend-only server (Render, API_ONLY=1): it answers the API and the sign-in callback, which the
+ * frontend (Vercel) forwards to it. The pages belong to the frontend, so a page opened here is sent
+ * there (NEXT_PUBLIC_APP_URL), or answers 404 when that is not set.
+ */
+function backendOnlyRedirect(req: NextRequest): NextResponse | null {
+  if (process.env.API_ONLY !== '1') return null;
+  const { pathname, search } = req.nextUrl;
+  if (pathname === '/api' || pathname.startsWith('/api/') || pathname === '/auth/callback') return null;
+  const app = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (app) return NextResponse.redirect(new URL(pathname + search, app), 308);
+  return new NextResponse('Not found', { status: 404 });
+}
+
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
+
+  const toFrontend = backendOnlyRedirect(req);
+  if (toFrontend) return toFrontend;
 
   // Apply rate limiting to API routes
   if (pathname.startsWith('/api')) {
