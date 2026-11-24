@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AccountList } from '@/components/account-list';
 import { Account } from '@/lib/account-service';
 import { UserWithRoles } from '@/lib/rbac';
@@ -16,11 +16,13 @@ export function AccountsClientWrapper({
   userProfile, 
   isAdminLevel 
 }: AccountsClientWrapperProps) {
-  const [accounts, _setAccounts] = useState(initialAccounts);
+  const router = useRouter();
+  // The list comes from the server page, so a refresh brings the new account in
+  const accounts = initialAccounts;
 
   const handleAccountCreated = () => {
-    // Refresh the page to get updated accounts
-    window.location.reload();
+    // Reload the page's data in place (no full page reload)
+    router.refresh();
   };
 
   return (

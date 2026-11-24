@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +36,10 @@ export function DepartmentList({
   userProfile: _userProfile,
   initialDepartmentMetrics
 }: DepartmentListProps) {
+  // After a create or delete, reload the page's data in place (no full page reload)
+  const router = useRouter();
+  const reloadData = () => router.refresh();
+
   // Departments are already filtered server-side based on permissions
   // No need to re-filter client-side - the server already determined
   // which departments this user can see via canViewDepartment checks
@@ -93,10 +98,7 @@ export function DepartmentList({
       {canCreateDepartments && (
         <div className="flex justify-end">
           <DepartmentCreateDialog
-            onDepartmentCreated={() => {
-              // Refresh the page to show the new department
-              window.location.reload();
-            }}
+            onDepartmentCreated={reloadData}
           >
             <Button data-tutorial="create-department" className="inline-flex items-center space-x-2">
               <Plus className="w-4 h-4" />
@@ -120,10 +122,7 @@ export function DepartmentList({
             </p>
             {canCreateDepartments && (
               <DepartmentCreateDialog
-                onDepartmentCreated={() => {
-                  // Refresh the page to show the new department
-                  window.location.reload();
-                }}
+                onDepartmentCreated={reloadData}
               >
                 <Button data-tutorial="create-department">
                   <Plus className="w-4 h-4 mr-2" />
@@ -164,10 +163,7 @@ export function DepartmentList({
                         <DepartmentDeleteDialog
                           departmentId={department.id}
                           departmentName={department.name}
-                          onDepartmentDeleted={() => {
-                            // Refresh the page to show updated department list
-                            window.location.reload();
-                          }}
+                          onDepartmentDeleted={reloadData}
                         >
                           <button 
                             className="inline-flex items-center justify-center h-8 w-8 rounded-md text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-300"

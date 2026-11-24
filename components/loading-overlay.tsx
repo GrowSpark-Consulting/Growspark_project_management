@@ -37,9 +37,21 @@ const MIN_LOADING_TIME = 800;
 // Maximum wait time for content to be ready (ms)
 const MAX_CONTENT_WAIT_TIME = 5000;
 
+// Navigation bar: hidden after this long even if the next page never arrives (cancelled navigation)
+const MAX_NAVIGATION_TIME = 15000;
+
+/**
+ * The full-screen splash covers the app only while it first loads in a tab. Moving between pages shows
+ * a thin bar at the top instead: the page stays visible and usable, and the bar finishes as soon as
+ * the next page is there. (Covering every navigation made each click look like a full page reload.)
+ */
 export function LoadingProvider({ children }: { children: ReactNode }) {
   // Start with loading true for initial page load
   const [isLoading, setIsLoading] = useState(true);
+  const [navigating, setNavigating] = useState(false);
+  const [navProgress, setNavProgress] = useState(0);
+  const navigationId = useRef(0);
+  const navigationTimer = useRef<NodeJS.Timeout | null>(null);
   const [progress, setProgress] = useState(0);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const pathname = usePathname();
@@ -164,8 +176,37 @@ export function LoadingProvider({ children }: { children: ReactNode }) {
     }
   }, [isInitialLoad, stopLoading]);
 
+  // Navigation bar: started by a link click, finished when the new page is there
+  const finishNavigation = useCallback(() => {
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
+    navigationTimer.current = null;
+    const id = navigationId.current;
+    setNavProgress(100);
+    setTimeout(() => {
+      if (navigationId.current !== id) return; // another navigation started meanwhile
+      setNavigating(false);
+      setNavProgress(0);
+    }, 250);
+  }, []);
+
+  const startNavigation = useCallback(() => {
+    navigationId.current += 1;
+    setNavigating(true);
+    setNavProgress(15);
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
+    navigationTimer.current = setTimeout(finishNavigation, MAX_NAVIGATION_TIME);
+  }, [finishNavigation]);
+
+  // Creep towards 90% while the next page loads
+  useEffect(() => {
+    if (!navigating) return;
+    const tick = setInterval(() => setNavProgress((p) => (p >= 90 ? p : p + (90 - p) * 0.15)), 200);
+    return () => clearInterval(tick);
+  }, [navigating]);
+
   // Track route changes (but not on initial load)
   useEffect(() => {
+    if (navigating) finishNavigation();
     if (!isInitialLoad) {
       // When route changes, check if we should stop loading
       // Give a small delay for any pending content to register
@@ -175,40 +216,28 @@ export function LoadingProvider({ children }: { children: ReactNode }) {
         }
       }, 500);
     }
+    // Only a change of page (path or query) finishes a navigation
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, searchParams, stopLoading, isInitialLoad]);
 
-  // Intercept navigation (anchor clicks)
+  // Intercept navigation (clicks on internal links)
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const anchor = target.closest('a');
-
-      if (anchor) {
-        const href = anchor.getAttribute('href');
-        // Only show loading for internal navigation
-        if (href && href.startsWith('/') && !href.startsWith('/api')) {
-          // Don't trigger for same page or hash links
-          if (href !== pathname && !href.startsWith('#')) {
-            startLoading();
-          }
-        }
-      }
+      // New tab / window, or not the main button: the page does not change here
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement).closest('a');
+      if (!anchor || (anchor.target && anchor.target !== '_self') || anchor.hasAttribute('download')) return;
+      const href = anchor.getAttribute('href');
+      if (!href || !href.startsWith('/') || href.startsWith('//') || href.startsWith('/api')) return;
+      // Same page (only a #hash differs): nothing loads
+      const url = new URL(href, window.location.href);
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      startNavigation();
     };
 
     document.addEventListener('click', handleClick, true);
     return () => document.removeEventListener('click', handleClick, true);
-  }, [pathname, startLoading]);
-
-  // Handle beforeunload (page refresh/close)
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // Show loading screen on page unload (refresh)
-      startLoading();
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [startLoading]);
+  }, [startNavigation]);
 
   // Handle tab visibility changes (prevent reload on tab switch)
   useEffect(() => {
@@ -239,8 +268,22 @@ export function LoadingProvider({ children }: { children: ReactNode }) {
       markContentReady
     }}>
       {children}
+      <NavigationBar visible={navigating} progress={navProgress} />
       <LoadingOverlay isVisible={isLoading} progress={progress} />
     </LoadingContext.Provider>
+  );
+}
+
+/** Thin bar along the top while the next page loads; never covers or blocks the page. */
+function NavigationBar({ visible, progress }: { visible: boolean; progress: number }) {
+  return (
+    <div
+      data-testid="navigation-progress"
+      aria-hidden="true"
+      className={`pointer-events-none fixed inset-x-0 top-0 z-[9999] h-[3px] transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <div className="h-full bg-primary transition-[width] duration-200 ease-out" style={{ width: `${progress}%` }} />
+    </div>
   );
 }
 

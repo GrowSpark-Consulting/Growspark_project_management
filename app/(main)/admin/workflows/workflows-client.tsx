@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -203,14 +204,11 @@ export default function WorkflowsClient({ canManageWorkflows }: WorkflowsClientP
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.location.href = `/admin/workflows/${template.id}/edit`}
-                      title="Open visual workflow editor"
-                    >
-                      <Edit className="w-4 h-4 mr-1" />
-                      Edit
+                    <Button asChild variant="outline" size="sm" title="Open visual workflow editor">
+                      <Link href={`/admin/workflows/${template.id}/edit`}>
+                        <Edit className="w-4 h-4 mr-1" />
+                        Edit
+                      </Link>
                     </Button>
                     {canManageWorkflows && (
                       <Button
