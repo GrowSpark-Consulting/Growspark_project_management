@@ -51,6 +51,7 @@
     "e2e:local:invite-browser": "node tests/local-e2e/invite-same-browser.mjs",
     "e2e:local:project-dialog": "node tests/local-e2e/project-dialog.mjs",
     "e2e:local:departments": "node tests/local-e2e/department-members.mjs",
+    "e2e:local:auth-callback": "node tests/local-e2e/auth-callback.mjs",
     "e2e:local:coverage": "node tests/local-e2e/coverage.mjs",
     "e2e:local:newsletters": "node tests/local-e2e/newsletters.mjs",
     "e2e:local:browser-reads": "node tests/local-e2e/browser-reads.mjs",

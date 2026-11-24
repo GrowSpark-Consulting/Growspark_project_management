@@ -1,19 +1,12 @@
 import { Metadata } from 'next';
-import { createServerSupabase } from '@/lib/supabase-server';
+import { loadPage, seg } from '@/lib/page-data';
+import { pageTitle } from '@/lib/page-loaders';
 
 export async function generateMetadata({ params }: { params: Promise<{ projectId: string }> }): Promise<Metadata> {
   const { projectId } = await params;
-  const supabase = await createServerSupabase();
-  if (!supabase) return { title: 'Project' };
-
-  const { data: project } = await supabase
-    .from('projects')
-    .select('name')
-    .eq('id', projectId)
-    .single();
-
+  const outcome = await loadPage(`title/project/${seg(projectId)}`, () => pageTitle('project', projectId)).catch(() => null);
   return {
-    title: project?.name || 'Project',
+    title: (outcome?.kind === 'ok' && outcome.data.title) || 'Project',
   };
 }
 

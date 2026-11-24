@@ -1,9 +1,7 @@
 import { Metadata } from 'next';
-import { getCurrentUserProfileServer } from '@/lib/auth-server';
-import { serverDepartmentService, DepartmentMetrics } from '@/lib/department-service';
-import { canViewDepartment, hasPermission } from '@/lib/rbac';
-import { Permission } from '@/lib/permissions';
 import { DepartmentList } from '@/components/department-list';
+import { loadPage, settle } from '@/lib/page-data';
+import { departmentsPage } from '@/lib/page-loaders';
 
 export const metadata: Metadata = {
   title: 'Departments',
@@ -11,72 +9,26 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
+const DENIED: Record<string, string> = {
+  login: 'Please log in to view departments.',
+  forbidden: "You don't have permission to view departments.",
+};
+
 export default async function DepartmentsPage() {
-  // Get current user and check permissions
-  const userProfile = await getCurrentUserProfileServer();
-  if (!userProfile) {
+  // Access checks, visible departments and their metrics in lib/page-loaders.ts
+  const { data, denied } = settle(await loadPage('departments', departmentsPage));
+  if (!data) {
     return (
       <div className="container mx-auto p-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900">Access Denied</h1>
-          <p className="text-gray-600 mt-2">Please log in to view departments.</p>
+          <p className="text-gray-600 mt-2">{DENIED[denied ?? ''] ?? DENIED.forbidden}</p>
         </div>
       </div>
     );
   }
 
-  // Check if user has permission to view any departments
-  const canViewAnyDepartments = await hasPermission(userProfile, Permission.VIEW_DEPARTMENTS) ||
-                                 await hasPermission(userProfile, Permission.VIEW_ALL_DEPARTMENTS);
-
-  if (!canViewAnyDepartments) {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Access Denied</h1>
-          <p className="text-gray-600 mt-2">You don&apos;t have permission to view departments.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Get all departments
-  const allDepartments = await serverDepartmentService.getAllDepartments();
-
-  // Check if user has VIEW_ALL_DEPARTMENTS override - if so, show all departments
-  const hasViewAllDepartments = await hasPermission(userProfile, Permission.VIEW_ALL_DEPARTMENTS);
-  
-  // Filter departments based on user access
-  // If user has VIEW_ALL_DEPARTMENTS, show all departments
-  // Otherwise, filter by department assignment
-  let departments = allDepartments;
-  if (!hasViewAllDepartments) {
-    // Need to await the async permission checks
-    const accessChecks = await Promise.all(
-      allDepartments.map(async (dept: any) => ({
-        dept,
-        canView: await canViewDepartment(userProfile, dept.id)
-      }))
-    );
-    departments = accessChecks.filter(({ canView }) => canView).map(({ dept }) => dept);
-  }
-
-  // Fetch metrics for all visible departments (in parallel for performance)
-  const metricsPromises = departments.map((dept: any) =>
-    serverDepartmentService.getDepartmentMetrics(dept.id)
-  );
-  const metricsResults = await Promise.all(metricsPromises);
-
-  // Build the metrics record (plain object for server→client serialization)
-  const departmentMetrics: Record<string, DepartmentMetrics> = {};
-  metricsResults.forEach((metrics:any, index:any) => {
-    if (metrics) {
-      departmentMetrics[departments[index].id] = metrics;
-    }
-  });
-
-  // Check if user can manage departments (create/edit/delete) - consolidated permission
-  const canManageDepartments = await hasPermission(userProfile, Permission.MANAGE_DEPARTMENTS);
+  const { departments, departmentMetrics, canManageDepartments, userProfile } = data;
   const canCreateDepartments = canManageDepartments; // Create is part of manage
 
   return (
@@ -98,8 +50,8 @@ export default async function DepartmentsPage() {
         </div>
       </div>
 
-      <DepartmentList 
-        departments={departments} 
+      <DepartmentList
+        departments={departments}
         canCreateDepartments={canCreateDepartments}
         canManageDepartments={canManageDepartments}
         userProfile={userProfile}

@@ -19,6 +19,7 @@
  */
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient, Prisma } from './generated/client';
+import { isFrontendOnly, refuseDataAccess } from '../frontend-mode';
 
 export type Tx = Prisma.TransactionClient;
 export { Prisma };
@@ -34,6 +35,7 @@ const cache = globalThis as unknown as { __pmPrisma?: PrismaClient };
 /** The shared client. Created on first use, and kept across hot reloads in development. */
 export function db(): PrismaClient {
   if (!cache.__pmPrisma) {
+    if (isFrontendOnly()) refuseDataAccess('The database');
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error('DATABASE_URL is not set');
     // Sized for one long-running server (Render) behind Supabase's session pooler, where every app

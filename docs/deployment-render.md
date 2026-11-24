@@ -2,7 +2,7 @@
 
 Project Management runs on Render as one Node web service. It connects to Postgres through `DATABASE_URL`, like the other GSC apps: set the environment variables below and the app connects on start. No credentials live in the code.
 
-> **Not ready for the shared GrowSpark database yet.** Phase 11 is done: the app no longer uses the Supabase Data API (tested with it switched off), so `DATABASE_URL` must be set. Deploy against the shared database only after the remaining steps at the end of this page, and after approval.
+> **Frontend on Vercel, backend on Render.** Render runs the API and is the only server with database settings. Vercel serves the pages: it forwards every `/api` request to Render, and its server-rendered pages get their data from Render's `/api/pages/...` endpoints (`lib/page-data.ts`). With `BACKEND_URL` set, the database and admin clients refuse to run, so a missed path fails loudly instead of reading another database.
 
 ## Service
 
@@ -19,8 +19,8 @@ Project Management runs on Render as one Node web service. It connects to Postgr
 
 | Variable | Required | Value |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | The `project_app` session-pooler string: `postgresql://project_app.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true`. Secret. Keep both parameters: Node's driver treats a plain `sslmode=require` as full certificate checking, which Supabase's own CA fails |
-| `BACKEND_URL` | Vercel only | The Render service's URL (`https://<service>.onrender.com`). Set before the build: Vercel then forwards every `/api` request to Render, so the browser stays on one origin. Never set it on Render |
+| `DATABASE_URL` | Render only | The `project_app` session-pooler string: `postgresql://project_app.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true`. Secret. Keep both parameters: Node's driver treats a plain `sslmode=require` as full certificate checking, which Supabase's own CA fails |
+| `BACKEND_URL` | Vercel only | The Render service's URL (`https://<service>.onrender.com`). Set before the build: Vercel then forwards every `/api` request and `/auth/callback` to Render, and its server-rendered pages load their data from Render, so the browser stays on one origin. Never set it on Render |
 | `DB_USER_ROLE` | Yes, on the shared database | The role each user request runs as, so row-level security applies: `project_user` there (created at cutover); `authenticated` on a Supabase database of this app's own |
 | `DB_ANON_ROLE` | Yes, on the shared database | Signed-out requests: `project_anon` (default `anon`) |
 | `DB_SYSTEM_ROLE` | Yes, on the shared database | Server jobs: `project_system`, allowed by explicit policies (unset: the login itself, as on Supabase) |
@@ -29,7 +29,7 @@ Project Management runs on Render as one Node web service. It connects to Postgr
 | `DB_POOL_MAX` | No | Connections per server, default `5`. All apps and Supabase itself share the plan's limit (60 on the Free plan), so keep the total of every app's servers × `DB_POOL_MAX` well below it |
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | The Supabase project used for sign-in (Supabase Auth); which one is integration decision D4 |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY` | Yes | That project's publishable key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes, for now | That project's service key: invitations and user administration through Supabase Auth. Secret |
+| `SUPABASE_SERVICE_ROLE_KEY` | Render only | That project's service key: invitations and user administration through Supabase Auth. Secret |
 | `NEXT_PUBLIC_APP_URL` | Yes | The app's public address, e.g. `https://project.<company domain>` |
 | `CRON_SECRET` | If scheduled jobs run | Long random string. Secret |
 | `RESEND_API_KEY` or `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | For email | Secret |
@@ -37,6 +37,12 @@ Project Management runs on Render as one Node web service. It connects to Postgr
 | `NODE_VERSION` | Yes | `22` |
 
 Locally the same variables come from `.env.development.local` (local Docker database), so nothing changes between machines except the values.
+
+## Vercel (frontend)
+
+Only these, all set before the build: `BACKEND_URL` (the Render URL), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `NEXT_PUBLIC_APP_URL`. No `DATABASE_URL`, `DB_*`, service key, `CRON_SECRET` or `R2_*`: those stay on Render. Function region: Singapore (`sin1`), next to Render.
+
+Test the split locally: build the backend as usual (`npm run e2e:local:build`) and start it with `PORT=3150 npm run e2e:local:start`; build and start the frontend with `FRONTEND_ONLY=http://127.0.0.1:3150` on the same two commands (port 3100). The suites then run against the frontend unchanged.
 
 ## Before the first deploy against the shared database
 

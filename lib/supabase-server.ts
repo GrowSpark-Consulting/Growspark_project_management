@@ -6,6 +6,21 @@ import { NextRequest } from 'next/server';
 import { logger } from './debug-logger';
 import { loadDirectMemberships } from './department-membership';
 import { withQueryLayer, queryLayerEnabled, userRunner } from './db/query';
+import { isFrontendOnly, refuseDataAccess } from './frontend-mode';
+
+// On the frontend-only server (lib/frontend-mode.ts) sign-in still works through Supabase Auth, but a
+// data read refuses: without a database there, `.from()` would otherwise go to the Supabase Data API
+// of the sign-in project, which is not where the data lives.
+function authOnly<T extends object>(client: T): T {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      if (prop === 'from' || prop === 'rpc' || prop === 'schema' || prop === 'storage') {
+        return () => refuseDataAccess(`supabase.${String(prop)}`);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
 
 // Phase 11: with DATABASE_URL set, `.from()` and `.rpc()` on these clients run through Prisma
 // (lib/db/query.ts) instead of the Supabase Data API; Auth and Storage still use Supabase.
@@ -91,6 +106,7 @@ export const createServerSupabase = async () => {
       },
     },
   });
+  if (isFrontendOnly()) return authOnly(client);
   return queryLayerEnabled() ? withQueryLayer(client, userRunner(client.auth)) : client;
 };
 
@@ -169,12 +185,14 @@ export const createApiSupabaseClient = (request: NextRequest) => {
       },
     },
   });
+  if (isFrontendOnly()) return authOnly(client);
   return queryLayerEnabled() ? withQueryLayer(client, userRunner(client.auth)) : client;
 };
 
 // Admin client for privileged operations (user creation, setup tokens)
 // Uses service role key - NEVER expose to client
 export const createAdminSupabaseClient = () => {
+  if (isFrontendOnly()) refuseDataAccess('The admin client');
   const url = getServerSupabaseUrl();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return null;

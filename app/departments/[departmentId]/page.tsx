@@ -1,17 +1,14 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getCurrentUserProfileServer } from '@/lib/auth-server';
-import { serverDepartmentService } from '@/lib/department-service';
-import { canViewDepartment, canManageDepartment, hasPermission } from '@/lib/rbac';
-import { Permission } from '@/lib/permissions';
 import { DepartmentOverview } from '@/components/department-overview';
+import { loadPage, seg, settle } from '@/lib/page-data';
+import { departmentPage, pageTitle } from '@/lib/page-loaders';
 
 export async function generateMetadata({ params }: { params: Promise<{ departmentId: string }> }): Promise<Metadata> {
   const { departmentId } = await params;
-  const department = await serverDepartmentService.getDepartmentById(departmentId);
-
+  const outcome = await loadPage(`title/department/${seg(departmentId)}`, () => pageTitle('department', departmentId)).catch(() => null);
   return {
-    title: department?.name || 'Department',
+    title: (outcome?.kind === 'ok' && outcome.data.title) || 'Department',
   };
 }
 
@@ -24,47 +21,18 @@ interface DepartmentPageProps {
 export default async function DepartmentPage({ params }: DepartmentPageProps) {
   const { departmentId } = await params;
 
-  // Get current user and check permissions
-  const userProfile = await getCurrentUserProfileServer();
-  if (!userProfile) {
-    notFound();
-  }
-
-  // Check if user can view this department
-  // Allow access if user has VIEW_ALL_DEPARTMENTS override OR can view this specific department
-  const hasViewAllDepartments = await hasPermission(userProfile, Permission.VIEW_ALL_DEPARTMENTS);
-  const canViewThisDepartment = await canViewDepartment(userProfile, departmentId);
-  
-  if (!hasViewAllDepartments && !canViewThisDepartment) {
-    notFound();
-  }
-
-  // Get department data
-  const department = await serverDepartmentService.getDepartmentById(departmentId);
-  if (!department) {
-    notFound();
-  }
-
-  // Get department metrics
-  const metrics = await serverDepartmentService.getDepartmentMetrics(departmentId);
-  if (!metrics) {
-    notFound();
-  }
-
-  // Get department projects
-  const projects = await serverDepartmentService.getDepartmentProjects(departmentId);
-
-  // Check if user can manage this specific department
-  const canManageDepartments = await canManageDepartment(userProfile, departmentId);
+  // Access checks and data in lib/page-loaders.ts (no access or no department: not found)
+  const { data } = settle(await loadPage(`departments/${seg(departmentId)}`, () => departmentPage(departmentId)));
+  if (!data) notFound();
 
   return (
     <div className="space-y-6">
       <DepartmentOverview
-        department={department}
-        metrics={metrics}
-        projects={projects}
-        canManageDepartments={canManageDepartments}
-        userProfile={userProfile}
+        department={data.department}
+        metrics={data.metrics}
+        projects={data.projects}
+        canManageDepartments={data.canManageDepartments}
+        userProfile={data.userProfile}
       />
     </div>
   );

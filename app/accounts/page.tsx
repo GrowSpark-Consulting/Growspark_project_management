@@ -1,9 +1,7 @@
 import { Metadata } from 'next';
-import { getCurrentUserProfileServer } from '@/lib/auth-server';
-import { accountService } from '@/lib/account-service';
 import { AccountsClientWrapper } from '@/components/accounts-client-wrapper';
-import { isSuperadmin, canManageAccounts, canViewAccounts } from '@/lib/rbac';
-import { createServerSupabase, createAdminSupabaseClient } from '@/lib/supabase-server';
+import { loadPage, settle } from '@/lib/page-data';
+import { accountsPage } from '@/lib/page-loaders';
 
 export const metadata: Metadata = {
   title: 'Accounts',
@@ -11,66 +9,36 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
+const DENIED: Record<string, { title: string; message: string }> = {
+  database: { title: 'Database Error', message: 'Unable to connect to database.' },
+  login: { title: 'Access Denied', message: 'Please log in to view accounts.' },
+  forbidden: { title: 'Access Denied', message: "You don't have permission to view accounts." },
+};
+
 export default async function AccountsPage() {
-  // Create server-side Supabase client with auth first (needed for permission checks)
-  const supabase = await createServerSupabase();
-  if (!supabase) {
+  // Access checks and data in lib/page-loaders.ts
+  const { data, denied } = settle(await loadPage('accounts', accountsPage));
+  if (!data) {
+    const { title, message } = DENIED[denied ?? ''] ?? DENIED.forbidden;
     return (
       <div className="container mx-auto p-6">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Database Error</h1>
-          <p className="text-gray-600 mt-2">Unable to connect to database.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
+          <p className="text-gray-600 mt-2">{message}</p>
         </div>
       </div>
     );
   }
-
-  // Get current user and check permissions
-  const userProfile = await getCurrentUserProfileServer();
-  if (!userProfile) {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Access Denied</h1>
-          <p className="text-gray-600 mt-2">Please log in to view accounts.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if user can view accounts (VIEW_ACCOUNTS, MANAGE_ACCOUNTS, or is account manager)
-  const hasAccess = await canViewAccounts(userProfile, supabase);
-  if (!hasAccess) {
-    return (
-      <div className="container mx-auto p-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900">Access Denied</h1>
-          <p className="text-gray-600 mt-2">You don&apos;t have permission to view accounts.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if user has admin-level access (can manage all accounts)
-  const isAdminLevel = isSuperadmin(userProfile) || await canManageAccounts(userProfile, supabase);
-
-  // Use admin client for reads — server component auth doesn't carry through RLS properly
-  // Permission checks are done above via canViewAccounts/canManageAccounts
-  const adminClient = createAdminSupabaseClient();
-  const accounts = isAdminLevel
-    ? await accountService.getAllAccounts(adminClient)
-    : await accountService.getUserAccounts((userProfile as any).id, adminClient);
 
   return (
     <div className="min-h-screen bg-background">
       <div className="space-y-4 sm:space-y-6">
-        <AccountsClientWrapper 
-          initialAccounts={accounts}
-          userProfile={userProfile}
-          isAdminLevel={isAdminLevel}
+        <AccountsClientWrapper
+          initialAccounts={data.accounts}
+          userProfile={data.userProfile}
+          isAdminLevel={data.isAdminLevel}
         />
       </div>
     </div>
   );
 }
-

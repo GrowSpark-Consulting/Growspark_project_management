@@ -12,9 +12,14 @@ import { NextResponse } from 'next/server'
  *
  * Supabase redirects users here with a `code` parameter that needs to be
  * exchanged for a session.
+ *
+ * Runs on the backend: the frontend-only server (Vercel) forwards this path to it (next.config.ts).
+ * Redirects are therefore relative, so the browser stays on the address it came from.
  */
+const goTo = (path: string) => new NextResponse(null, { status: 307, headers: { Location: path } })
+
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
+  const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const rawNext = searchParams.get('next') ?? '/welcome'
   // Prevent open redirect: only allow internal paths (must start with / and not //)
@@ -28,6 +33,9 @@ export async function GET(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
       {
+        // The browser client's cookie name (lib/supabase.ts): the one-time code verifier is stored under
+        // it, and the session set here must be the one the app reads
+        cookieOptions: { name: 'sb-project-management-auth' },
         cookies: {
           getAll() {
             return cookieStore.getAll()
@@ -65,13 +73,13 @@ export async function GET(request: Request) {
         redirectTo = '/welcome'
       }
 
-      return NextResponse.redirect(`${origin}${redirectTo}`)
+      return goTo(redirectTo)
     }
 
     // If there was an error exchanging the code, redirect to login with error
-    return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`)
+    return goTo('/login?error=auth_callback_failed')
   }
 
   // No code provided - redirect to login
-  return NextResponse.redirect(`${origin}/login?error=no_code`)
+  return goTo('/login?error=no_code')
 }

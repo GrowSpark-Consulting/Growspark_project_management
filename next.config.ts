@@ -17,6 +17,8 @@ const projectRoot = getRealPath(process.cwd());
 const realNodeModulesPath = path.join(projectRoot, 'node_modules');
 
 const nextConfig: NextConfig = {
+  // A second local build (the frontend-only test run, tests/local-e2e/with-local-env.mjs) uses its own folder
+  distDir: process.env.NEXT_DIST_DIR || '.next',
 
   // CRITICAL: Fix Windows path casing issues
   // On Windows, paths like C:\Users\user\Desktop and C:\Users\user\desktop are the same folder
@@ -121,12 +123,21 @@ const nextConfig: NextConfig = {
 
   // Frontend on Vercel, API on Render: when BACKEND_URL (the Render service's URL) is set at build
   // time, every /api request is forwarded there before Vercel's own routes. The browser only talks to
-  // the Vercel origin, so the sign-in cookie, CSP and CORS stay same-origin. Unset (Render itself,
-  // local): no forwarding.
+  // the Vercel origin, so the sign-in cookie, CSP and CORS stay same-origin. Server-rendered pages get
+  // their data from the same backend (lib/page-data.ts), so Vercel holds no database credentials.
+  // Unset (Render itself, local): no forwarding.
   async rewrites() {
     const backend = process.env.BACKEND_URL?.trim().replace(/\/$/, '');
     if (!backend) return [];
-    return { beforeFiles: [{ source: '/api/:path*', destination: `${backend}/api/:path*` }], afterFiles: [], fallback: [] };
+    return {
+      beforeFiles: [
+        { source: '/api/:path*', destination: `${backend}/api/:path*` },
+        // Sign-in links (password reset, email confirmation): the code is exchanged for a session there
+        { source: '/auth/callback', destination: `${backend}/auth/callback` },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
   },
 
   // Security Headers

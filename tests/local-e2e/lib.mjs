@@ -36,7 +36,7 @@ export function loadEnv() {
     throw new Error(`Refusing to run: Supabase URL ${url} is not local. These tests write data and must only run against local Docker.`);
   }
   return {
-    url, anon, service, appUrl: (env.E2E_APP_URL || 'http://localhost:3100').replace(/\/$/, ''), cronSecret: env.CRON_SECRET || null,
+    url, anon, service, appUrl: (process.env.E2E_APP_URL || env.E2E_APP_URL || 'http://localhost:3100').replace(/\/$/, ''), cronSecret: env.CRON_SECRET || null,
     // The app's tables live in DB_SCHEMA (project in the shared-database rehearsal); the test clients read them there
     schema: env.DB_SCHEMA || 'public',
     rehearsal: env.REHEARSAL === '1',
@@ -97,7 +97,18 @@ export async function resetLocalDb(env, { log = console.log } = {}) {
     // the developer's own local database
     log('Rebuilding the rehearsal database (scripts/shared-db/rehearse.mjs)…');
     execSync('node scripts/shared-db/rehearse.mjs --rebuild', { cwd: ROOT, stdio: 'ignore' });
-    return;
+    // The rebuild restarts the database; the Data API the tests read through reconnects and reloads its
+    // schema a moment later. Wait until it serves the app's tables and Auth answers.
+    for (let i = 0; i < 60; i++) {
+      const a = adminClient(env);
+      const [db, auth] = await Promise.all([
+        a.from('user_profiles').select('id', { count: 'exact', head: true }),
+        a.auth.admin.listUsers({ perPage: 1 }).catch((e) => ({ error: e })),
+      ]);
+      if (!db.error && db.count !== null && !auth.error) return;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    throw new Error('The rehearsal database, its Data API or Auth did not come back after the rebuild');
   }
   const admin = adminClient(env);
   const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });

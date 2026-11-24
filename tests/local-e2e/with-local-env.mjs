@@ -52,6 +52,22 @@ if (process.env.SUPABASE_URL_VIA) {
 for (const key of ['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
   if (!vars[key]) { console.error(`Refusing to run: ${key} is missing from .env.development.local.`); process.exit(1); }
 }
+// FRONTEND_ONLY=<backend origin>: run as the frontend-only server, as on Vercel. No database address,
+// no service key and no other server secret (set empty, so the .env files cannot fill them in); every
+// /api request and the server-rendered pages' data come from that backend. Built into its own folder.
+if (process.env.FRONTEND_ONLY) {
+  const backend = new URL(process.env.FRONTEND_ONLY);
+  if (!['127.0.0.1', 'localhost'].includes(backend.hostname)) {
+    console.error(`Refusing to run: FRONTEND_ONLY is not local (${backend.hostname}).`);
+    process.exit(1);
+  }
+  for (const key of Object.keys(vars)) {
+    if (/^(DATABASE_URL|SUPABASE_SERVICE_ROLE_KEY|CRON_SECRET|DB_|R2_|SMTP_|RESEND_)/.test(key)) vars[key] = '';
+  }
+  vars.DATABASE_URL = vars.SUPABASE_SERVICE_ROLE_KEY = '';
+  vars.BACKEND_URL = backend.origin;
+  vars.NEXT_DIST_DIR = '.next-frontend';
+}
 
 const [cmd, ...args] = process.argv.slice(2);
 if (!cmd) { console.error('Usage: node tests/local-e2e/with-local-env.mjs <command> [args...]'); process.exit(1); }
