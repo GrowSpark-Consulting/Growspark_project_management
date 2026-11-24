@@ -1,7 +1,9 @@
 'use client'
 
-import { Suspense, useEffect } from "react"
+import { Suspense, useEffect, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/hooks/useAuth"
 import { LoginForm } from "@/components/login-form"
 import { DemoLoginForm } from "@/components/demo-login-form"
@@ -14,19 +16,17 @@ export default function Page() {
   const { user, userProfile, loading } = useAuth()
   const router = useRouter()
   const supabaseReady = isSupabaseConfigured()
+  // No company workspace registered yet: the login form stays, with a way to create the workspace
+  // (the home page sends a new installation to /signup by itself)
+  const [noWorkspace, setNoWorkspace] = useState(false)
 
-  // Check for first-run (no users) and redirect to onboarding
   useEffect(() => {
     if (!supabaseReady) return
     fetch('/api/onboarding/check-first-run')
       .then(res => res.json())
-      .then(data => {
-        if (data.firstRun) {
-          router.replace('/signup')
-        }
-      })
+      .then(data => setNoWorkspace(data.firstRun === true))
       .catch(() => {})
-  }, [router, supabaseReady])
+  }, [supabaseReady])
 
   useEffect(() => {
     // Wait until the session and the profile are loaded
@@ -95,6 +95,14 @@ export default function Page() {
             <p className="text-xs text-amber-600 mt-3">
               See the README for detailed setup instructions.
             </p>
+          </div>
+        )}
+
+        {noWorkspace && (
+          <div role="status" className="mb-6 rounded-lg border border-line bg-surface p-4 text-sm">
+            <p className="font-medium">No company workspace has been created here yet.</p>
+            <p className="mt-1 text-ink-muted">Create it first; you become its manager and invite everyone else.</p>
+            <Button asChild className="mt-3 w-full"><Link href="/signup">Create your company workspace</Link></Button>
           </div>
         )}
 

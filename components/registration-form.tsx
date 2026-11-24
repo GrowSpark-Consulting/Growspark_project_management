@@ -38,7 +38,7 @@ export function RegistrationForm({ onRegistering }: { onRegistering?: () => void
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [phase, setPhase] = useState<'form' | 'creating' | 'signing-in'>('form');
-  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const appHost = typeof window !== 'undefined' ? window.location.host : '';
 
   const loadStatus = useCallback(async () => {
     setStatus({ kind: 'loading' });
@@ -194,26 +194,28 @@ export function RegistrationForm({ onRegistering }: { onRegistering?: () => void
   return (
     <Card>
       <CardHeader>
-        <HeaderBrand className="mb-2" />
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <HeaderBrand />
+          <Button asChild variant="outline" size="sm"><Link href="/login">Log in</Link></Button>
+        </div>
         <CardTitle>Create your company workspace</CardTitle>
         <CardDescription>You&apos;ll be the workspace manager. Invite your employees and clients once you&apos;re in.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} noValidate className="space-y-4">
           {field('companyName', 'Company or organisation name', { autoComplete: 'organization', placeholder: 'Grow Spark Technologies', maxLength: 120 })}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {field('workspaceName', 'Workspace name', { placeholder: 'Grow Spark', maxLength: 80 })}
-            <div className="space-y-1.5">
-              <Label htmlFor="workspaceSlug">Workspace URL</Label>
-              <div className="flex items-center rounded-md border border-line-strong bg-surface focus-within:border-primary">
-                <span className="pl-3 text-xs text-ink-muted whitespace-nowrap">{appOrigin.replace(/^https?:\/\//, '')}/</span>
-                <input id="workspaceSlug" className="h-9 w-full bg-transparent px-1 text-sm outline-none" value={form.workspaceSlug} maxLength={40} disabled={submitting}
-                  aria-invalid={!!show('workspaceSlug')} aria-describedby="workspaceSlug-msg"
-                  onChange={(e) => { setSlugEdited(true); set('workspaceSlug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} onBlur={() => blur('workspaceSlug')} />
-              </div>
-              {show('workspaceSlug') ? <p id="workspaceSlug-msg" className="text-xs text-danger">{errors.workspaceSlug}</p>
-                : form.workspaceSlug && !slugProblem(form.workspaceSlug) ? <p id="workspaceSlug-msg" className="text-xs text-success">Available</p> : null}
+          {field('workspaceName', 'Workspace name', { placeholder: 'Grow Spark', maxLength: 80 })}
+          <div className="space-y-1.5">
+            <Label htmlFor="workspaceSlug">Workspace URL</Label>
+            {/* Full width, and the address shortens with "…" rather than spilling out of the box */}
+            <div className="flex min-w-0 items-center overflow-hidden rounded-md border border-line-strong bg-surface focus-within:border-primary">
+              <span className="min-w-0 shrink truncate pl-3 text-xs text-ink-muted" title={`${appHost}/`}>{appHost}/</span>
+              <input id="workspaceSlug" className="h-9 min-w-[7rem] flex-1 bg-transparent px-1 text-sm outline-none" value={form.workspaceSlug} maxLength={40} disabled={submitting}
+                aria-invalid={!!show('workspaceSlug')} aria-describedby="workspaceSlug-msg"
+                onChange={(e) => { setSlugEdited(true); set('workspaceSlug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} onBlur={() => blur('workspaceSlug')} />
             </div>
+            {show('workspaceSlug') ? <p id="workspaceSlug-msg" className="text-xs text-danger">{errors.workspaceSlug}</p>
+              : form.workspaceSlug && !slugProblem(form.workspaceSlug) ? <p id="workspaceSlug-msg" className="text-xs text-success">Available</p> : null}
           </div>
           {field('name', 'Your full name', { autoComplete: 'name', maxLength: 120 })}
           {field('email', 'Business email', { type: 'email', autoComplete: 'email', placeholder: 'manager@company.com' })}
