@@ -38,7 +38,15 @@ export function RoleGuard({
 }: RoleGuardProps) {
   const { user, userProfile, loading } = useAuth();
   const router = useRouter();
-  const [permissionCheck, setPermissionCheck] = useState<boolean | null>(null);
+  // Decide the cases that need no lookup right away, so opening a page does not flash "Loading..."
+  const [permissionCheck, setPermissionCheck] = useState<boolean | null>(() => {
+    if (loading || !user || !userProfile) return null;
+    if (isSuperadmin(userProfile)) return true;
+    const unassigned = isUnassigned(userProfile);
+    if (unassigned) return allowUnassigned ? true : null;
+    if (!requirePermission && !requireAnyPermission) return true;
+    return null;
+  });
   const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {

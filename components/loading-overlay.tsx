@@ -37,13 +37,15 @@ const MIN_LOADING_TIME = 800;
 // Maximum wait time for content to be ready (ms)
 const MAX_CONTENT_WAIT_TIME = 5000;
 
-// Navigation bar: hidden after this long even if the next page never arrives (cancelled navigation)
-const MAX_NAVIGATION_TIME = 15000;
+// Navigation bar: hidden after this long even if the next page never arrives (cancelled navigation).
+// Long enough to cover the backend waking up from sleep.
+const MAX_NAVIGATION_TIME = 60000;
 
 /**
  * The full-screen splash covers the app only while it first loads in a tab. Moving between pages shows
- * a thin bar at the top instead: the page stays visible and usable, and the bar finishes as soon as
- * the next page is there. (Covering every navigation made each click look like a full page reload.)
+ * a thin bar at the top instead: the current page stays visible and usable until the next one is ready
+ * (there are no route-level loading screens), and the bar finishes as soon as the next page is there.
+ * (Covering or blanking the page on every navigation made each click look like a full page reload.)
  */
 export function LoadingProvider({ children }: { children: ReactNode }) {
   // Start with loading true for initial page load
