@@ -14,6 +14,7 @@ import { TimeEntriesList } from '@/components/time-entries-list';
 import { TimeEntriesSummary } from '@/components/time-entries-summary';
 import { TimeEntriesChart } from '@/components/time-entries-chart';
 import { RoleGuard } from '@/components/role-guard';
+import { usePersistentState } from '@/lib/hooks/use-persistent-state';
 
 // Lazy load the availability calendar
 const DragAvailabilityCalendar = dynamic(() => import('@/components/drag-availability-calendar'), {
@@ -24,7 +25,7 @@ const DragAvailabilityCalendar = dynamic(() => import('@/components/drag-availab
 export default function TimeEntriesPage() {
   const { user, userProfile, loading } = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('list');
+  const [activeTab, setActiveTab] = usePersistentState('time-entries:tab', 'list');
   const [showAvailabilityDialog, setShowAvailabilityDialog] = useState(false);
 
   useEffect(() => {

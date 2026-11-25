@@ -1,7 +1,7 @@
 'use client';
 
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +44,8 @@ import { Badge } from '@/components/ui/badge';
 import { Clock, Edit, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { UserWithRoles } from '@/lib/rbac';
 import { myTimeEntries, myTimeEntryFilters } from '@/lib/client-queries';
+import useSWR, { mutate as globalMutate } from 'swr';
+import { usePersistentState } from '@/lib/hooks/use-persistent-state';
 import { format, subDays, differenceInDays, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -76,28 +78,22 @@ const ENTRIES_PER_PAGE = 20;
 const EDIT_WINDOW_DAYS = 14;
 
 export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalEntries, setTotalEntries] = useState(0);
+  // Filters, sort and page are remembered while moving around the app
+  const [currentPage, setCurrentPage] = usePersistentState('time-entries:page', 1);
 
   // Filters
   // Use tomorrow's date for end date to handle timezone differences
   // (entries created in UTC may appear as "tomorrow" in local time)
-  const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(() => {
+  const [startDate, setStartDate] = usePersistentState('time-entries:from', format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = usePersistentState('time-entries:to', (() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     return format(tomorrow, 'yyyy-MM-dd');
-  });
-  const [projectFilter, setProjectFilter] = useState('all');
-  const [taskFilter, setTaskFilter] = useState('all');
+  })());
+  const [projectFilter, setProjectFilter] = usePersistentState('time-entries:project', 'all');
+  const [taskFilter, setTaskFilter] = usePersistentState('time-entries:task', 'all');
   const [sortBy, _setSortBy] = useState<'date' | 'hours' | 'project'>('date');
   const [sortOrder, _setSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  // Projects and Tasks for filters
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [tasks, setTasks] = useState<Array<{ id: string; name: string }>>([]);
 
   // Edit Dialog
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -110,45 +106,28 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingEntry, setDeletingEntry] = useState<TimeEntry | null>(null);
 
-  const fetchFiltersData = useCallback(async () => {
-    try {
-      // Projects and tasks the user has logged time on
+  // Projects and tasks the user has logged time on, for the filters (cached by SWR)
+  const userId = userProfile?.id;
+  const { data: filterOptions } = useSWR(
+    userId ? ['my-time-entry-filters', userId] : null,
+    async () => {
       const { data: filterData } = await myTimeEntryFilters();
-      const projectsData = filterData?.projects;
+      const unique = (rows: Array<Record<string, { id: string; name: string } | undefined>> | undefined, field: 'projects' | 'tasks') =>
+        Array.from(new Map((rows || []).filter((entry) => entry[field]).map((entry) => [entry[field]!.id, entry[field]!])).values());
+      return { projects: unique(filterData?.projects, 'projects'), tasks: unique(filterData?.tasks, 'tasks') };
+    },
+    { onError: () => toast.error('Failed to load filter options') }
+  );
+  const projects = filterOptions?.projects ?? [];
+  const tasks = filterOptions?.tasks ?? [];
 
-      const uniqueProjects = Array.from(
-        new Map(
-          projectsData
-            ?.filter((entry: { projects?: { id: string; name: string } }) => entry.projects)
-            .map((entry: { projects: { id: string; name: string } }) => [entry.projects.id, entry.projects])
-        ).values()
-      );
-
-      setProjects(uniqueProjects as Array<{ id: string; name: string }>);
-
-      const tasksData = filterData?.tasks;
-
-      const uniqueTasks = Array.from(
-        new Map(
-          tasksData
-            ?.filter((entry: { tasks?: { id: string; name: string } }) => entry.tasks)
-            .map((entry: { tasks: { id: string; name: string } }) => [entry.tasks.id, entry.tasks])
-        ).values()
-      );
-
-      setTasks(uniqueTasks as Array<{ id: string; name: string }>);
-    } catch (error: unknown) {
-      toast.error('Failed to load filter options');
-    }
-  }, [userProfile]);
-
-  const fetchEntries = useCallback(async () => {
-    setLoading(true);
-    try {
+  // The signed-in user's entries, filtered, sorted and paged by the API. Cached per filter combination:
+  // coming back shows the last result at once; changing a filter keeps the current rows until the new ones arrive.
+  const { data: entriesPage, mutate: refreshEntries } = useSWR(
+    userId ? ['my-time-entries', userId, currentPage, startDate, endDate, projectFilter, taskFilter, sortBy, sortOrder] : null,
+    async () => {
       const offset = (currentPage - 1) * ENTRIES_PER_PAGE;
       const sortColumn = sortBy === 'date' ? 'entry_date' : sortBy === 'hours' ? 'hours_logged' : 'project_id';
-
-      // The signed-in user's entries, filtered, sorted and paged by the API
       const { data, error, count } = await myTimeEntries({
         from: startDate,
         to: endDate,
@@ -159,28 +138,19 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
         offset,
         limit: ENTRIES_PER_PAGE,
       });
-
-      if (error) {
-        toast.error('Failed to load time entries');
-        return;
-      }
-
-      setEntries(data || []);
-      setTotalEntries(count || 0);
-    } catch (error: unknown) {
-      toast.error('Failed to load time entries');
-    } finally {
-      setLoading(false);
-    }
-  }, [userProfile, currentPage, startDate, endDate, projectFilter, taskFilter, sortBy, sortOrder]);
-
-  useEffect(() => {
-    fetchFiltersData();
-  }, [fetchFiltersData]);
-
-  useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+      if (error) throw error;
+      return { entries: (data || []) as TimeEntry[], total: count || 0 };
+    },
+    { keepPreviousData: true, onError: () => toast.error('Failed to load time entries') }
+  );
+  const entries = entriesPage?.entries ?? [];
+  const totalEntries = entriesPage?.total ?? 0;
+  const loading = entriesPage === undefined;
+  // After an edit or delete: refresh this list and the other views of the user's time
+  const fetchEntries = () => {
+    void refreshEntries();
+    void globalMutate((key) => Array.isArray(key) && (String(key[0]).startsWith('my-time-entr')));
+  };
 
   const canEditEntry = (entry: TimeEntry): boolean => {
     const entryDate = parseISO(entry.entry_date);

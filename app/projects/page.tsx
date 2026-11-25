@@ -2,7 +2,9 @@
 
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/hooks/useAuth'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import useSWR from 'swr'
+import { usePersistentState } from '@/lib/hooks/use-persistent-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,7 +15,7 @@ import ProjectCreationDialog from '@/components/project-creation-dialog'
 import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority } from '@/components/project-data-table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useRouter } from 'next/navigation'
-import { hasPermission, canViewProject, isSuperadmin } from '@/lib/rbac'
+import { hasPermission, canViewProject } from '@/lib/rbac'
 import { Permission } from '@/lib/permissions'
 
 type Project = any
@@ -35,30 +37,62 @@ interface ProjectWithDetails extends Project {
 }
 
 
+// The projects the user can see, with departments, workflow step and team (runs on the server as the user)
+async function loadProjects(): Promise<ProjectWithDetails[]> {
+  const { data: list, error: listError } = await projectsList()
+  if (listError) throw listError
+  return (list || []) as unknown as ProjectWithDetails[]
+}
+
+// Of those, the ones this user may open (no per-project check for those who see every project)
+async function visibleFor(userProfile: any, projects: ProjectWithDetails[]): Promise<ProjectWithDetails[]> {
+  if (projects.length === 0) return []
+  if (await hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS)) return projects
+  if (!(await hasPermission(userProfile, Permission.VIEW_PROJECTS))) return []
+  const accessChecks = await Promise.all(
+    projects.map(async (project) => ((await canViewProject(userProfile, project.id)) ? project : null))
+  )
+  return accessChecks.filter(Boolean) as ProjectWithDetails[]
+}
+
 export default function ProjectsPage() {
   const { userProfile } = useAuth()
   const router = useRouter()
-  const [projects, setProjects] = useState<ProjectWithDetails[]>([])
-  const [visibleProjects, setVisibleProjects] = useState<ProjectWithDetails[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [departmentFilter, setDepartmentFilter] = useState<string>('all')
-  const [allDepartments, setAllDepartments] = useState<Department[]>([])
+  const [departmentFilter, setDepartmentFilter] = usePersistentState<string>('projects:department', 'all')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<ProjectWithDetails | null>(null)
   const [deletingProject, setDeletingProject] = useState(false)
   const [canCreateProject, setCanCreateProject] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Cleanup refresh timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current)
-    }
-  }, [])
+  // Cached by SWR: coming back to this page shows the last list at once and refreshes it in the background
+  const userId = (userProfile as any)?.id as string | undefined
+  const { data: projectsData, error: loadError, mutate: mutateProjects } = useSWR(
+    userId ? ['projects-page', userId] : null,
+    loadProjects
+  )
+  const projects: ProjectWithDetails[] = useMemo(() => projectsData ?? [], [projectsData])
+  const projectIds = useMemo(() => projects.map((p: any) => p.id).join(','), [projects])
+  const { data: visibleData, mutate: mutateVisible } = useSWR(
+    userId && projectsData ? ['projects-page-visible', userId, projectIds] : null,
+    () => visibleFor(userProfile, projects),
+    { keepPreviousData: true }
+  )
+  const visibleProjects: ProjectWithDetails[] = visibleData ?? []
+  const loading = !userProfile || (!loadError && (projectsData === undefined || visibleData === undefined))
+  const error = loadError ? 'Failed to load projects' : null
 
-  // Handle project creation - simple optimistic update
+  // Departments of all projects, for the filter dropdown
+  const allDepartments = useMemo(() => {
+    const departmentsMap = new Map<string, Department>()
+    projects.forEach((project: any) => {
+      (project.departments || []).forEach((dept: any) => {
+        if (!departmentsMap.has(dept.id)) departmentsMap.set(dept.id, dept)
+      })
+    })
+    return Array.from(departmentsMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [projects])
+
+  // Handle project creation: show it at once, then refresh the list for its complete data
   const handleProjectCreated = useCallback((newProject: any) => {
     if (newProject) {
       const projectWithDetails = {
@@ -78,99 +112,16 @@ export default function ProjectsPage() {
         departments: [],
         workflow_step: null,
       } as unknown as ProjectWithDetails
-      // Add directly to visibleProjects for immediate visibility
-      setVisibleProjects(prev => [projectWithDetails, ...prev])
+      void mutateVisible((prev) => [projectWithDetails, ...(prev || [])], { revalidate: false })
     }
-    // Trigger background refresh after 500ms to get complete data
-    if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current)
-    refreshTimeoutRef.current = setTimeout(() => {
-      setRefreshKey(prev => prev + 1)
-    }, 500)
-  }, [])
+    void mutateProjects()
+  }, [mutateVisible, mutateProjects])
 
   // Check create project permission (using consolidated MANAGE_PROJECTS)
   useEffect(() => {
     if (!userProfile) return;
     hasPermission(userProfile, Permission.MANAGE_PROJECTS).then(setCanCreateProject);
   }, [userProfile]);
-
-  useEffect(() => {
-    let cancelled = false
-
-    const loadProjects = async () => {
-      if (!userProfile) return
-
-      try {
-        setLoading(true)
-        // Projects the user can see, with departments, workflow step and team (runs on the server as the user)
-        const { data: list, error: listError } = await projectsList()
-        if (listError) throw listError
-        const projectsWithDetails = (list || []) as unknown as ProjectWithDetails[]
-
-        if (cancelled) return
-
-        setProjects(projectsWithDetails)
-
-        // Extract unique departments from all projects for the filter dropdown
-        const departmentsMap = new Map<string, Department>()
-        projectsWithDetails.forEach((project: any) => {
-          project.departments.forEach((dept: any) => {
-            if (!departmentsMap.has(dept.id)) {
-              departmentsMap.set(dept.id, dept)
-            }
-          })
-        })
-        setAllDepartments(Array.from(departmentsMap.values()).sort((a, b) => a.name.localeCompare(b.name)))
-      } catch (err: unknown) {
-        if (!cancelled) setError('Failed to load projects')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    loadProjects()
-
-    return () => {
-      cancelled = true
-    }
-  }, [userProfile, refreshKey])
-
-  // Filter projects based on permissions - ONLY runs on login or explicit refresh
-  // This prevents race conditions with optimistic updates
-  const filterProjects = useCallback(async () => {
-    const hasViewAllProjects = await hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS)
-
-    if (hasViewAllProjects) {
-      setVisibleProjects(projects)
-      return
-    }
-
-    const hasViewProjects = await hasPermission(userProfile, Permission.VIEW_PROJECTS)
-    if (!hasViewProjects) {
-      setVisibleProjects([])
-      return
-    }
-
-    // Check all project access in parallel (not sequential)
-    const accessChecks = await Promise.all(
-      projects.map(async (project) => {
-        const canView = await canViewProject(userProfile, project.id)
-        return canView ? project : null
-      })
-    )
-    setVisibleProjects(accessChecks.filter(Boolean) as ProjectWithDetails[])
-  }, [userProfile, projects])
-
-  useEffect(() => {
-    if (!userProfile || loading) return
-
-    if (projects.length === 0) {
-      setVisibleProjects([])
-      return
-    }
-
-    filterProjects()
-  }, [userProfile, refreshKey, loading, projects, filterProjects])
 
   // Status colors removed - projects now use workflow steps
 
@@ -237,9 +188,10 @@ export default function ProjectsPage() {
         throw error
       }
 
-      // Update local state to remove the deleted project
-      setProjects(projects.filter((p: any) => p.id !== projectToDelete.id))
-      setVisibleProjects(visibleProjects.filter((p: any) => p.id !== projectToDelete.id))
+      // Remove it from the list right away, then refresh the cached list
+      const deletedId = projectToDelete.id
+      void mutateVisible((prev) => (prev || []).filter((p: any) => p.id !== deletedId), { revalidate: false })
+      void mutateProjects()
 
       // Close dialog and reset state
       setDeleteDialogOpen(false)

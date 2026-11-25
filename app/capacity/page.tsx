@@ -7,7 +7,8 @@
 
 import { useAuth } from '@/lib/hooks/useAuth'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import useSWR from 'swr'
 import DragAvailabilityCalendar from '@/components/drag-availability-calendar'
 import CapacityDashboard from '@/components/capacity-dashboard'
 import { hasPermission } from '@/lib/permission-checker'
@@ -18,29 +19,18 @@ import { AlertCircle } from 'lucide-react'
 export default function CapacityPage() {
   const { user, userProfile, loading } = useAuth()
   const router = useRouter()
-  const [canAccess, setCanAccess] = useState(false)
-  const [checkingPermissions, setCheckingPermissions] = useState(true)
-
-  useEffect(() => {
-    async function checkAccess() {
-      if (!userProfile) {
-        setCanAccess(false)
-        setCheckingPermissions(false)
-        return
-      }
-
+  // Remembered for this visit: coming back to the page does not show "Loading..." again
+  const { data: access } = useSWR(
+    userProfile ? ['page-access:capacity', (userProfile as any).id] : null,
+    async () => {
       // Check if user can view team capacity or edit their own availability
       const viewCapacity = await hasPermission(userProfile, Permission.VIEW_TEAM_CAPACITY)
       const editAvailability = await hasPermission(userProfile, Permission.EDIT_OWN_AVAILABILITY)
-
-      setCanAccess(viewCapacity || editAvailability)
-      setCheckingPermissions(false)
+      return viewCapacity || editAvailability
     }
-
-    if (!loading) {
-      void checkAccess()
-    }
-  }, [userProfile, loading])
+  )
+  const canAccess = access ?? false
+  const checkingPermissions = !!userProfile && access === undefined
 
   // Redirect to login if not authenticated
   useEffect(() => {

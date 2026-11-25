@@ -1,12 +1,13 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { User } from '@supabase/supabase-js'
 import { createClientSupabase } from '../supabase'
 import { getCurrentUserProfile, signOut } from '../auth'
 import { UserWithRoles } from '../rbac'
 import { clearPermissionCache } from '../permission-checker'
 import { logger } from '../debug-logger'
+import { clearPersistentState } from '../hooks/use-persistent-state'
 
 interface AuthContextType {
   user: User | null
@@ -25,6 +26,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserWithRoles | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // The listener below is created once, so it reads the current profile through this ref
+  // (reading the state directly would always see the first render's null)
+  const profileRef = useRef<UserWithRoles | null>(null)
+  useEffect(() => { profileRef.current = userProfile }, [userProfile])
 
   useEffect(() => {
     const supabase = createClientSupabase()
@@ -104,20 +109,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async (event: string, session: any) => {
         if (!isMounted) return
 
-        if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && userProfile) {
-          return
-        }
-
         if (event === 'INITIAL_SESSION') {
           return
         }
-
-        currentProfileRequest = null
 
         if (event === 'TOKEN_REFRESHED' && session?.user) {
           setUser(session.user)
           return
         }
+
+        // Supabase repeats SIGNED_IN for the same person (e.g. when the tab becomes visible again).
+        // The profile is already loaded: keep the app as it is instead of showing loading states again.
+        if (event === 'SIGNED_IN' && session?.user && profileRef.current?.id === session.user.id) {
+          setUser(session.user)
+          return
+        }
+
+        currentProfileRequest = null
 
         if (event === 'SIGNED_OUT') {
           setUser(null)
@@ -128,7 +136,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           setUser(session.user)
-          setLoading(true)
+          // Another person (or nobody yet): show loading until their profile is there.
+          // Same person (e.g. USER_UPDATED): refresh the profile in the background.
+          if (profileRef.current?.id !== session.user.id) setLoading(true)
 
           const profileRequest = getCurrentUserProfile()
           currentProfileRequest = profileRequest
@@ -190,6 +200,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true)
       await signOut()
+      // Remembered filters and tabs belong to the person who signed out
+      clearPersistentState()
       setUser(null)
       setUserProfile(null)
     } catch (error: unknown) {
@@ -201,8 +213,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const refreshProfile = async () => {
+    // With a profile already loaded, refresh it in the background: the app stays as it is meanwhile
+    const silent = !!profileRef.current
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       // Clear permission cache when refreshing profile to get fresh permissions
       clearPermissionCache()
       const profile = await getCurrentUserProfile()
@@ -211,7 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logger.error('Error refreshing profile', {}, error as Error)
       setError('Failed to refresh profile')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 

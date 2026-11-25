@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { SidebarNavigation } from '@/components/sidebar';
@@ -9,6 +9,13 @@ import { SidebarMobileDrawer } from '@/components/sidebar/sidebar-mobile-drawer'
 
 interface AppLayoutProps {
   children: React.ReactNode;
+}
+
+// Scroll position of each page's content area, so Back/Forward returns to where the person was
+const scrollPositions = new Map<string, number>();
+let cameBackOrForward = false;
+if (typeof window !== 'undefined') {
+  window.addEventListener('popstate', () => { cameBackOrForward = true; });
 }
 
 // Pages that should NOT show the sidebar (auth pages, etc.)
@@ -20,6 +27,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { userProfile, loading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
 
   // Handle hydration
   useEffect(() => {
@@ -40,6 +48,38 @@ export function AppLayout({ children }: AppLayoutProps) {
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [pathname]);
+
+  // Scroll position: remembered per page. Back/Forward restores it (once the content is tall enough);
+  // following a link starts the new page at the top.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const key = pathname;
+    const target = cameBackOrForward ? scrollPositions.get(key) ?? 0 : 0;
+    cameBackOrForward = false;
+    let restoring = true;
+    let frames = 0;
+    let frame = 0;
+    const restore = () => {
+      main.scrollTop = target;
+      // Content may still be arriving: keep trying for up to ~1 second
+      if (Math.abs(main.scrollTop - target) > 1 && frames++ < 60) frame = requestAnimationFrame(restore);
+      else restoring = false;
+    };
+    frame = requestAnimationFrame(restore);
+    const remember = () => { if (!restoring) scrollPositions.set(key, main.scrollTop); };
+    const stopRestoring = () => { restoring = false; cancelAnimationFrame(frame); };
+    main.addEventListener('scroll', remember, { passive: true });
+    // The person scrolling themselves wins over the restore
+    main.addEventListener('wheel', stopRestoring, { passive: true });
+    main.addEventListener('touchstart', stopRestoring, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      main.removeEventListener('scroll', remember);
+      main.removeEventListener('wheel', stopRestoring);
+      main.removeEventListener('touchstart', stopRestoring);
+    };
+  }, [pathname, isMounted]);
 
   // Close mobile menu on escape key
   useEffect(() => {
@@ -129,7 +169,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
         {/* Content */}
         {/* Content on the canvas: 24px gutter, max 1440px */}
-        <main role="main" className="flex-1 overflow-auto bg-bg">
+        <main ref={mainRef} role="main" className="flex-1 overflow-auto bg-bg">
           <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6">
             {children}
           </div>

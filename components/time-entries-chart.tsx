@@ -1,7 +1,7 @@
 'use client';
 
 
-import { useState, useEffect } from 'react';
+import useSWR from 'swr';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { UserWithRoles } from '@/lib/rbac';
 import { myTimeEntries } from '@/lib/client-queries';
@@ -50,16 +50,11 @@ const COLORS = [
 ];
 
 export function TimeEntriesChart({ userProfile }: TimeEntriesChartProps) {
-  const [dailyData, setDailyData] = useState<DailyData[]>([]);
-  const [projectData, setProjectData] = useState<ProjectData[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchChartData = async () => {
-      setLoading(true);
-      try {
+  // Cached by SWR: returning to the page shows the last charts at once and refreshes them in the background
+  const { data: chart, error: chartError } = useSWR(['my-time-entries-chart', (userProfile as any)?.id], async () => {
+    const empty = { dailyData: [] as DailyData[], projectData: [] as ProjectData[] };
+    {
+      {
         const thirtyDaysAgo = subDays(new Date(), 30);
         const startDate = format(thirtyDaysAgo, 'yyyy-MM-dd');
         const endDate = format(new Date(), 'yyyy-MM-dd');
@@ -67,8 +62,7 @@ export function TimeEntriesChart({ userProfile }: TimeEntriesChartProps) {
         // The signed-in user's entries for the last 30 days
         const { data: entries } = await myTimeEntries({ from: startDate, to: endDate, sort: 'entry_date', order: 'asc' });
 
-        if (cancelled) return;
-        if (!entries) return;
+        if (!entries) return empty;
 
         // Process daily data
         const dailyMap = new Map<string, number>();
@@ -92,8 +86,6 @@ export function TimeEntriesChart({ userProfile }: TimeEntriesChartProps) {
           hours: parseFloat(hours.toFixed(1)),
         }));
 
-        if (cancelled) return;
-        setDailyData(dailyArray);
 
         // Process project data
         const projectMap = new Map<string, { name: string; hours: number }>();
@@ -122,23 +114,14 @@ export function TimeEntriesChart({ userProfile }: TimeEntriesChartProps) {
           }))
           .sort((a, b) => b.hours - a.hours);
 
-        if (cancelled) return;
-        setProjectData(projectArray);
-
-      } catch (error: unknown) {
-      } finally {
-        if (!cancelled) setLoading(false);
+        return { dailyData: dailyArray, projectData: projectArray };
       }
-    };
+    }
+  });
+  const dailyData = chart?.dailyData ?? [];
+  const projectData = chart?.projectData ?? [];
 
-    fetchChartData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userProfile]);
-
-  if (loading) {
+  if (!chart && !chartError) {
     return (
       <Card>
         <CardContent className="p-6">

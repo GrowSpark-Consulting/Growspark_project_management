@@ -1,7 +1,7 @@
 'use client';
 
 
-import { useState, useEffect, useCallback } from 'react';
+import useSWR from 'swr';
 import { Card, CardContent } from '@/components/ui/card';
 import { Clock, Calendar, TrendingUp, BarChart3 } from 'lucide-react';
 import { UserWithRoles } from '@/lib/rbac';
@@ -20,19 +20,11 @@ interface SummaryStats {
 }
 
 export function TimeEntriesSummary({ userProfile }: TimeEntriesSummaryProps) {
-  const [stats, setStats] = useState<SummaryStats>({
-    hoursThisWeek: 0,
-    hoursThisMonth: 0,
-    averageHoursPerDay: 0,
-    totalEntries: 0,
-  });
-  const [loading, setLoading] = useState(true);
-
   const userId = (userProfile as any).id;
 
-  const fetchSummaryStats = useCallback(async () => {
-    setLoading(true);
-    try {
+  // Cached by SWR: returning to the page shows the last numbers at once and refreshes them in the background
+  const { data, error } = useSWR(['my-time-entry-summary', userId], async (): Promise<SummaryStats> => {
+    {
       const now = new Date();
       const weekStart = startOfWeek(now, { weekStartsOn: 1 }); // Monday
       const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
@@ -70,23 +62,18 @@ export function TimeEntriesSummary({ userProfile }: TimeEntriesSummaryProps) {
       // Total entries count
       const count = summary?.count;
 
-      setStats({
+      return {
         hoursThisWeek,
         hoursThisMonth,
         averageHoursPerDay,
         totalEntries: count || 0,
-      });
-    } catch (error: unknown) {
-    } finally {
-      setLoading(false);
+      };
     }
-  }, [userId]);
+  });
+  // A failed load shows zeros (as before) instead of loading forever
+  const stats = data ?? (error ? { hoursThisWeek: 0, hoursThisMonth: 0, averageHoursPerDay: 0, totalEntries: 0 } : undefined);
 
-  useEffect(() => {
-    fetchSummaryStats();
-  }, [fetchSummaryStats]);
-
-  if (loading) {
+  if (!stats) {
     return (
       <Card>
         <CardContent className="p-6">

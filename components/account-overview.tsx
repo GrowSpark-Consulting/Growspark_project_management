@@ -64,6 +64,16 @@ const DEFAULT_KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'complete', name: 'Complete', color: '#10B981', order: 4 },
 ];
 
+// The last lists shown for each account in this browser tab: coming back shows them at once (no spinners)
+// while they refresh in the background.
+const accountPanelCache = new Map<string, {
+  members?: unknown[];
+  hours?: Record<string, { remaining: number | null; taskSum: number }>;
+  milestones?: Milestone[];
+  activeIssues?: unknown[];
+  finishedProjects?: unknown[];
+}>();
+
 export function AccountOverview({ account, metrics, urgentItems, userProfile, hasFullAccess = true }: AccountOverviewProps) {
   // Account overview component
   // NOTE: Kanban/Gantt for projects is deprecated (workflows replace it), only table view remains
@@ -71,6 +81,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   // Memoize account ID to avoid complex expressions in deps
   const accountId = useMemo(() => (account as any).id, [account]);
 
+  const [cached] = useState(() => accountPanelCache.get((account as any).id));
   const [projects, setProjects] = useState(account.projects);
   const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>(DEFAULT_KANBAN_COLUMNS);
   const [accountMembers, setAccountMembers] = useState<Array<{
@@ -92,9 +103,9 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
         } | null;
       }>;
     } | null;
-  }>>([]);
+  }>>((cached?.members as any) ?? []);
   const [customColumnAssignments, setCustomColumnAssignments] = useState<Record<string, string>>({});
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>(cached?.milestones ?? []);
   const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false);
   const [milestoneDialogInitialDate] = useState<Date | undefined>(undefined);
   const [projectDialogStartDate] = useState<Date | undefined>(undefined);
@@ -105,12 +116,12 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   const [projectToMove, setProjectToMove] = useState<ProjectWithDetails | null>(null);
 
   // Active Issues State
-  const [activeIssues, setActiveIssues] = useState<(ProjectIssue & { project?: { id: string; name: string } })[]>([]);
-  const [loadingActiveIssues, setLoadingActiveIssues] = useState(true);
+  const [activeIssues, setActiveIssues] = useState<(ProjectIssue & { project?: { id: string; name: string } })[]>((cached?.activeIssues as any) ?? []);
+  const [loadingActiveIssues, setLoadingActiveIssues] = useState(!cached?.activeIssues);
 
   // Finished Projects State
-  const [finishedProjects, setFinishedProjects] = useState<ProjectWithDetails[]>([]);
-  const [loadingFinishedProjects, setLoadingFinishedProjects] = useState(true);
+  const [finishedProjects, setFinishedProjects] = useState<ProjectWithDetails[]>((cached?.finishedProjects as any) ?? []);
+  const [loadingFinishedProjects, setLoadingFinishedProjects] = useState(!cached?.finishedProjects);
 
   // Delete Confirmation Dialog State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -163,7 +174,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
 
   // Separate state for remaining hours to avoid infinite loop
   // (fetching updates projects → re-triggers fetch → infinite loop)
-  const [projectHoursData, setProjectHoursData] = useState<Record<string, { remaining: number | null; taskSum: number }>>({});
+  const [projectHoursData, setProjectHoursData] = useState<Record<string, { remaining: number | null; taskSum: number }>>(cached?.hours ?? {});
 
   // Fetch remaining hours for all projects - use projectIds as stable dependency
   const projectIds = useMemo(() => projects.map((p: any) => p.id).join(','), [projects]);
@@ -229,7 +240,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
 
   // Load active issues for this account
   const loadActiveIssues = useCallback(async () => {
-      setLoadingActiveIssues(true);
+      if (!accountPanelCache.get(accountId)?.activeIssues) setLoadingActiveIssues(true);
       try {
         const { data: issues, error } = await accountIssues(accountId);
         if (!error) setActiveIssues(issues || []);
@@ -246,7 +257,7 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
 
   // Load finished projects for this account
   const loadFinishedProjects = useCallback(async () => {
-      setLoadingFinishedProjects(true);
+      if (!accountPanelCache.get(accountId)?.finishedProjects) setLoadingFinishedProjects(true);
       try {
         const { data, error } = await finishedAccountProjects(accountId);
 
@@ -272,6 +283,18 @@ export function AccountOverview({ account, metrics, urgentItems, userProfile, ha
   useEffect(() => {
     loadFinishedProjects();
   }, [loadFinishedProjects]);
+
+  // Keep this account's snapshot current (only lists that have finished loading)
+  useEffect(() => {
+    const previous = accountPanelCache.get(accountId);
+    accountPanelCache.set(accountId, {
+      members: accountMembers,
+      hours: projectHoursData,
+      milestones,
+      activeIssues: loadingActiveIssues ? previous?.activeIssues : activeIssues,
+      finishedProjects: loadingFinishedProjects ? previous?.finishedProjects : finishedProjects,
+    });
+  }, [accountId, accountMembers, projectHoursData, milestones, activeIssues, finishedProjects, loadingActiveIssues, loadingFinishedProjects]);
 
   // Handle issue status update
   const handleUpdateIssueStatus = async (issueId: string, projectId: string, newStatus: 'open' | 'in_progress' | 'resolved') => {

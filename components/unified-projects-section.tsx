@@ -2,7 +2,8 @@
 
 import { toast } from 'sonner';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import useSWR from 'swr';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,7 +26,8 @@ import { activeWorkflowInstances, deleteProject } from '@/lib/client-queries';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { useProjects } from '@/lib/hooks/use-data';
-import { hasPermission, canViewProject, isSuperadmin } from '@/lib/rbac';
+import { hasPermission, canViewProject } from '@/lib/rbac';
+import { usePersistentState } from '@/lib/hooks/use-persistent-state';
 import { Permission } from '@/lib/permissions';
 import { UserWithRoles } from '@/lib/rbac-types';
 
@@ -134,99 +136,92 @@ interface UnifiedProjectsSectionProps {
   userProfile: UserWithRoles | null;
 }
 
+// Workflow inbox lists: an empty list when the request fails, so one failing list does not hide the others
+const inboxList = (field: 'projects' | 'approvals') => async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const body = await res.json();
+  return body?.success ? body[field] || [] : [];
+};
+const inboxProjects = inboxList('projects');
+const inboxApprovals = inboxList('approvals');
+
+// Which of the user's projects they may see (no check needed for those who see every project)
+async function visibleFor(userProfile: UserWithRoles, projects: ProjectWithDetails[]): Promise<ProjectWithDetails[]> {
+  if (projects.length === 0) return [];
+  const [hasViewAllProjects, hasViewProjects] = await Promise.all([
+    hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS),
+    hasPermission(userProfile, Permission.VIEW_PROJECTS)
+  ]);
+  if (hasViewAllProjects) return [...projects];
+  if (!hasViewProjects) return [];
+  const allowed = await Promise.all(projects.map((project) => canViewProject(userProfile, project.id).catch(() => false)));
+  return projects.filter((_, index) => allowed[index]);
+}
+
+// Current workflow step label per project
+async function workflowStepsFor(projectIds: string[]): Promise<{ [key: string]: string | null }> {
+  if (projectIds.length === 0) return {};
+  const { data: workflowData, error } = await activeWorkflowInstances(projectIds);
+  const steps: { [key: string]: string | null } = {};
+  if (error || !workflowData) return steps;
+  workflowData.forEach((instance: any) => {
+    if (!instance.project_id) return;
+    let nodeLabel: string | null = null;
+    // Strategy 1: the label from the snapshot (most reliable for modified workflows)
+    const snapshot = instance.started_snapshot;
+    if (snapshot?.nodes && Array.isArray(snapshot.nodes)) {
+      const currentNode = snapshot.nodes.find((n: any) => n.id === instance.current_node_id);
+      if (currentNode?.label) nodeLabel = currentNode.label;
+    }
+    // Strategy 2: the live workflow node (workflows without snapshots)
+    if (!nodeLabel && instance.workflow_nodes?.label) nodeLabel = instance.workflow_nodes.label;
+    // Strategy 3: a current node without a label
+    if (!nodeLabel && instance.current_node_id) nodeLabel = 'Active Workflow';
+    if (nodeLabel) steps[instance.project_id as string] = nodeLabel;
+  });
+  return steps;
+}
+
 export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [_workflowProjects, setWorkflowProjects] = useState<WorkflowProject[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
-  const [pipelineProjects, setPipelineProjects] = useState<PipelineProject[]>([]);
-  const [pastProjects, setPastProjects] = useState<PastProject[]>([]);
-  const [activeTab, setActiveTab] = useState('projects');
+  const [activeTab, setActiveTab] = usePersistentState('dashboard-projects:tab', 'projects');
 
-  // Fetch all assigned projects using SWR hook
-  const { projects: assignedProjects, isLoading: projectsLoading, error: projectsError } = useProjects((userProfile as any)?.id as string | undefined, 100);
-  const [visibleProjects, setVisibleProjects] = useState<ProjectWithDetails[]>([]);
+  // Everything below is cached by SWR: returning to the page shows the last data at once and refreshes it
+  // in the background; skeletons only appear when nothing has been loaded yet.
+  const userId = (userProfile as any)?.id as string | undefined;
+  const { projects: assignedProjects, isLoading: projectsLoading, error: projectsError, mutate: mutateProjects } = useProjects(userId, 100);
+  const { data: pendingApprovals = [], isLoading: approvalsLoading } = useSWR<ApprovalRequest[]>('/api/workflows/my-approvals', inboxApprovals);
+  const { data: pipelineProjects = [], isLoading: pipelineLoading } = useSWR<PipelineProject[]>('/api/workflows/my-pipeline', inboxProjects);
+  const { data: pastProjects = [], isLoading: pastLoading } = useSWR<PastProject[]>('/api/workflows/my-past-projects', inboxProjects);
+  const loading = approvalsLoading || pipelineLoading || pastLoading;
 
-  // Workflow steps for projects
-  const [workflowSteps, setWorkflowSteps] = useState<{ [key: string]: string | null }>({});
+  // Filter projects based on permissions
+  const projectIds = useMemo(
+    () => assignedProjects.map((p: ProjectWithDetails) => p.id).join(','),
+    [assignedProjects]
+  );
+  const { data: visibleData, mutate: mutateVisible } = useSWR(
+    userProfile && !projectsLoading ? ['dashboard-visible-projects', userProfile.id, projectIds] : null,
+    () => visibleFor(userProfile as UserWithRoles, assignedProjects),
+    { keepPreviousData: true }
+  );
+
+  const visibleProjects: ProjectWithDetails[] = visibleData ?? [];
+  const checkingAccess = !!userProfile && !projectsLoading && !projectsError && visibleData === undefined;
+
+  // Workflow steps for visible projects
+  const visibleIds = visibleProjects.map((p: ProjectWithDetails) => p.id).join(',');
+  const { data: workflowSteps = {} } = useSWR(
+    visibleIds ? ['dashboard-workflow-steps', visibleIds] : null,
+    () => workflowStepsFor(visibleIds.split(',')),
+    { keepPreviousData: true }
+  );
 
   // Delete project state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<ProjectWithDetails | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
-  const [_canDeleteProjects, setCanDeleteProjects] = useState(false);
-
-  // Check delete permission
-  useEffect(() => {
-    if (!userProfile) {
-      setCanDeleteProjects(false);
-      return;
-    }
-
-    async function checkDeletePermission() {
-      // Superadmins can delete all projects
-      if (isSuperadmin(userProfile)) {
-        setCanDeleteProjects(true);
-        return;
-      }
-
-      // Check if user has MANAGE_ALL_PROJECTS or MANAGE_PROJECTS permission
-      const [hasManageAll, hasManage] = await Promise.all([
-        hasPermission(userProfile, Permission.MANAGE_ALL_PROJECTS),
-        hasPermission(userProfile, Permission.MANAGE_PROJECTS)
-      ]);
-
-      setCanDeleteProjects(hasManageAll || hasManage);
-    }
-
-    checkDeletePermission();
-  }, [userProfile]);
-
-  // Load workflow inbox data
-  useEffect(() => {
-    loadInboxData();
-  }, []);
-
-  const loadInboxData = async () => {
-    try {
-      setLoading(true);
-
-      // OPTIMIZED: Fetch all API calls in parallel instead of sequential
-      const [projectsRes, approvalsRes, pipelineRes, pastRes] = await Promise.all([
-        fetch('/api/workflows/my-projects'),
-        fetch('/api/workflows/my-approvals'),
-        fetch('/api/workflows/my-pipeline'),
-        fetch('/api/workflows/my-past-projects')
-      ]);
-
-      const [projectsData, approvalsData, pipelineData, pastData] = await Promise.all([
-        projectsRes.ok ? projectsRes.json() : { success: false },
-        approvalsRes.ok ? approvalsRes.json() : { success: false },
-        pipelineRes.ok ? pipelineRes.json() : { success: false },
-        pastRes.ok ? pastRes.json() : { success: false }
-      ]);
-
-      if (projectsData.success) {
-        setWorkflowProjects(projectsData.projects || []);
-      }
-
-      if (approvalsData.success) {
-        setPendingApprovals(approvalsData.approvals || []);
-      }
-
-      if (pipelineData.success) {
-        setPipelineProjects(pipelineData.projects || []);
-      }
-
-      if (pastData.success) {
-        setPastProjects(pastData.projects || []);
-      }
-    } catch {
-      toast.error('Failed to load project data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Handle project deletion
   const handleDeleteProject = async () => {
@@ -242,8 +237,10 @@ export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionPr
         throw error;
       }
 
-      // Update local state to remove the deleted project
-      setVisibleProjects(prev => prev.filter((p: any) => p.id !== projectToDelete.id));
+      // Remove it from the list right away, then refresh the cached lists
+      const deletedId = projectToDelete.id;
+      void mutateVisible((prev) => (prev || []).filter((p: ProjectWithDetails) => p.id !== deletedId), { revalidate: false });
+      void mutateProjects();
 
       // Close dialog and reset state
       setDeleteDialogOpen(false);
@@ -254,112 +251,6 @@ export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionPr
       setDeletingProject(false);
     }
   };
-
-  // Stabilize project IDs to prevent infinite loops
-  const projectIds = useMemo(
-    () => assignedProjects.map((p: ProjectWithDetails) => p.id).join(','),
-    [assignedProjects]
-  );
-
-  // Filter projects based on permissions
-  useEffect(() => {
-    if (!userProfile || assignedProjects.length === 0) {
-      setVisibleProjects([]);
-      return;
-    }
-
-    let isMounted = true;
-
-    async function filterProjects() {
-      const [hasViewAllProjects, hasViewProjects] = await Promise.all([
-        hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS),
-        hasPermission(userProfile, Permission.VIEW_PROJECTS)
-      ]);
-
-      if (!isMounted) return;
-
-      if (hasViewAllProjects) {
-        setVisibleProjects([...assignedProjects]);
-        return;
-      }
-
-      if (!hasViewProjects) {
-        setVisibleProjects([]);
-        return;
-      }
-
-      const projectPermissionChecks = await Promise.all(
-        assignedProjects.map((project: ProjectWithDetails) =>
-          canViewProject(userProfile, project.id).catch(() => false)
-        )
-      );
-
-      if (!isMounted) return;
-
-      const filtered = assignedProjects.filter((_: ProjectWithDetails, index: number) => projectPermissionChecks[index]);
-      setVisibleProjects(filtered);
-    }
-
-    filterProjects();
-
-    return () => {
-      isMounted = false;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- assignedProjects intentionally omitted: projectIds provides stable memoized representation
-  }, [projectIds, userProfile]);
-
-  // Fetch workflow steps for visible projects
-  useEffect(() => {
-    if (visibleProjects.length === 0) {
-      setWorkflowSteps({});
-      return;
-    }
-
-    async function fetchWorkflowSteps() {
-      const projectIds = visibleProjects.map((p: any) => p.id);
-
-      // Workflow runs with both the snapshot and the live node data
-      const { data: workflowData, error } = await activeWorkflowInstances(projectIds);
-
-      if (!error && workflowData) {
-        const steps: { [key: string]: string | null } = {};
-
-        workflowData.forEach((instance: any) => {
-          if (!instance.project_id) return;
-
-          let nodeLabel: string | null = null;
-
-          // Strategy 1: Try to get label from snapshot (most reliable for modified workflows)
-          const snapshot = instance.started_snapshot;
-          if (snapshot?.nodes && Array.isArray(snapshot.nodes)) {
-            const currentNode = snapshot.nodes.find((n: any) => n.id === instance.current_node_id);
-            if (currentNode?.label) {
-              nodeLabel = currentNode.label;
-            }
-          }
-
-          // Strategy 2: Fallback to live workflow_nodes table (for workflows without snapshots)
-          if (!nodeLabel && instance.workflow_nodes?.label) {
-            nodeLabel = instance.workflow_nodes.label;
-          }
-
-          // Strategy 3: If we have a current_node_id but no label, show generic "Active Workflow"
-          if (!nodeLabel && instance.current_node_id) {
-            nodeLabel = 'Active Workflow';
-          }
-
-          // Set the step label if we found anything
-          if (nodeLabel) {
-            steps[instance.project_id as string] = nodeLabel;
-          }
-        });
-
-        setWorkflowSteps(steps);
-      }
-    }
-
-    fetchWorkflowSteps();
-  }, [visibleProjects]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -404,7 +295,7 @@ export function UnifiedProjectsSection({ userProfile }: UnifiedProjectsSectionPr
     workflow_step: workflowSteps[project.id] || null
   }));
 
-  if (loading || projectsLoading) {
+  if (loading || projectsLoading || checkingAccess) {
     return (
       <Card>
         <CardHeader>

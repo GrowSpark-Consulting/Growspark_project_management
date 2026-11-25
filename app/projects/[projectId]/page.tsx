@@ -243,38 +243,52 @@ function TaskItem({
   )
 }
 
+// The last data shown for each project in this browser tab. Coming back to a project shows it at once
+// (no spinners) while everything is refreshed in the background; edits on the page keep it current.
+interface ProjectPageSnapshot {
+  project: ProjectWithDetails
+  canEdit: boolean
+  stepNames: string[]
+  tasks?: Task[]
+  projectHours?: number
+  updates?: ProjectUpdate[]
+  issues?: ProjectIssue[]
+}
+const projectPageCache = new Map<string, ProjectPageSnapshot>()
+
 export default function ProjectDetailPage() {
   const { userProfile } = useAuth()
   const params = useParams()
   const projectId = params.projectId as string
-  const [project, setProject] = useState<ProjectWithDetails | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [cached] = useState(() => projectPageCache.get(projectId))
+  const [project, setProject] = useState<ProjectWithDetails | null>(cached?.project ?? null)
+  const [loading, setLoading] = useState(!cached)
   const [error, setError] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const [canEditProject, setCanEditProject] = useState(false)
+  const [canEditProject, setCanEditProject] = useState(cached?.canEdit ?? false)
   
   // Project Updates State
-  const [projectUpdates, setProjectUpdates] = useState<ProjectUpdate[]>([])
-  const [loadingUpdates, setLoadingUpdates] = useState(false)
+  const [projectUpdates, setProjectUpdates] = useState<ProjectUpdate[]>(cached?.updates ?? [])
+  const [loadingUpdates, setLoadingUpdates] = useState(!cached?.updates)
   const [showNewUpdateForm, setShowNewUpdateForm] = useState(false)
   const [newUpdateContent, setNewUpdateContent] = useState('')
   const [submittingUpdate, setSubmittingUpdate] = useState(false)
 
   // Project Issues State
-  const [projectIssues, setProjectIssues] = useState<ProjectIssue[]>([])
-  const [loadingIssues, setLoadingIssues] = useState(false)
+  const [projectIssues, setProjectIssues] = useState<ProjectIssue[]>(cached?.issues ?? [])
+  const [loadingIssues, setLoadingIssues] = useState(!cached?.issues)
   const [showNewIssueForm, setShowNewIssueForm] = useState(false)
   const [newIssueContent, setNewIssueContent] = useState('')
   const [submittingIssue, setSubmittingIssue] = useState(false)
 
   // Project Notes State
   const [editingNotes, setEditingNotes] = useState(false)
-  const [notesContent, setNotesContent] = useState('')
+  const [notesContent, setNotesContent] = useState(cached?.project?.notes || '')
   const [savingNotes, setSavingNotes] = useState(false)
 
   // Task State
-  const [tasks, setTasks] = useState<Task[]>([])
-  const tasksRef = useRef<Task[]>([])
+  const [tasks, setTasks] = useState<Task[]>(cached?.tasks ?? [])
+  const tasksRef = useRef<Task[]>(cached?.tasks ?? [])
 
   // Project ref to avoid stale closures in intervals
   const projectRef = useRef<ProjectWithDetails | null>(null)
@@ -288,7 +302,7 @@ export default function ProjectDetailPage() {
     })
   }, [])
 
-  const [loadingTasks, setLoadingTasks] = useState(false)
+  const [loadingTasks, setLoadingTasks] = useState(!cached?.tasks)
   const [canViewTasks, setCanViewTasks] = useState(false)
   const [canCreateTasks, setCanCreateTasks] = useState(false)
   const [canEditTasks, setCanEditTasks] = useState(false)
@@ -354,7 +368,7 @@ export default function ProjectDetailPage() {
   }, [projectId])
   useEffect(() => { if (ganttDialogOpen) loadGanttSchedule() }, [ganttDialogOpen, loadGanttSchedule])
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
-  const [projectLevelHours, setProjectLevelHours] = useState<number>(0) // Hours logged directly to project (no task)
+  const [projectLevelHours, setProjectLevelHours] = useState<number>(cached?.projectHours ?? 0) // Hours logged directly to project (no task)
 
   // Project estimated hours state
   const [projectEstimatedHours, setProjectEstimatedHours] = useState<string>('')
@@ -364,7 +378,7 @@ export default function ProjectDetailPage() {
   const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0)
 
   // Workflow step names to display as status (array for parallel workflows)
-  const [workflowStepNames, setWorkflowStepNames] = useState<string[]>([])
+  const [workflowStepNames, setWorkflowStepNames] = useState<string[]>(cached?.stepNames ?? [])
 
   // Parallel workflow support - track selected active step and dialog state
   const [selectedActiveStepId, setSelectedActiveStepId] = useState<string | null>(null)
@@ -437,6 +451,21 @@ export default function ProjectDetailPage() {
     projectRef.current = project
   }, [project])
 
+  // Keep this project's snapshot current (only parts that have finished loading)
+  useEffect(() => {
+    if (!project) return
+    const previous = projectPageCache.get(projectId)
+    projectPageCache.set(projectId, {
+      project,
+      canEdit: canEditProject,
+      stepNames: workflowStepNames,
+      tasks: loadingTasks ? previous?.tasks : tasks,
+      projectHours: loadingTasks ? previous?.projectHours : projectLevelHours,
+      updates: loadingUpdates ? previous?.updates : projectUpdates,
+      issues: loadingIssues ? previous?.issues : projectIssues,
+    })
+  }, [projectId, project, canEditProject, workflowStepNames, tasks, projectLevelHours, projectUpdates, projectIssues, loadingTasks, loadingUpdates, loadingIssues])
+
   // DISABLED: Auto-refresh tasks was causing jarring UI updates when filling forms
   // Tasks will update when user saves changes or navigates to the page
   // Users can manually refresh the page if they need to see real-time updates
@@ -485,7 +514,7 @@ export default function ProjectDetailPage() {
   const loadTasks = useCallback(async () => {
     if (!projectId) return
 
-    setLoadingTasks(true)
+    if (!projectPageCache.get(projectId)?.tasks) setLoadingTasks(true)
     try {
       // Tasks of this project and the hours logged to the project without a task (runs on the server)
       const { data: loaded } = await projectPageData(projectId, 'tasks')
@@ -534,7 +563,7 @@ export default function ProjectDetailPage() {
       if (!userProfile || !projectId) return
 
       try {
-        setLoading(true)
+        if (!projectPageCache.has(projectId)) setLoading(true)
         // The project with its details, workflow step and edit right (runs on the server as the user)
         const { data: loaded, error: loadError } = await projectPageData(projectId, 'overview')
         if (loadError || !loaded) {
@@ -1089,8 +1118,7 @@ export default function ProjectDetailPage() {
       if (!userProfile || !projectId) return
 
       try {
-        setLoading(true)
-        // Same lookup as the initial load (runs on the server as the user)
+        // Same lookup as the initial load (runs on the server as the user); the page stays as it is meanwhile
         const { data: loaded, error: loadError } = await projectPageData(projectId, 'overview')
         if (loadError || !loaded) {
           throw new Error(loadError instanceof Error ? loadError.message : 'Failed to load project')
@@ -1110,7 +1138,7 @@ export default function ProjectDetailPage() {
   const loadProjectUpdates = useCallback(async () => {
     if (!projectId) return
 
-    setLoadingUpdates(true)
+    if (!projectPageCache.get(projectId)?.updates) setLoadingUpdates(true)
     try {
       const response = await fetch(`/api/projects/${projectId}/updates`)
       const result = await response.json()
@@ -1169,7 +1197,7 @@ export default function ProjectDetailPage() {
   const loadProjectIssues = useCallback(async () => {
     if (!projectId) return
 
-    setLoadingIssues(true)
+    if (!projectPageCache.get(projectId)?.issues) setLoadingIssues(true)
     try {
       const response = await fetch(`/api/projects/${projectId}/issues`)
       const result = await response.json()

@@ -7,6 +7,11 @@ import { isSuperadmin, isUnassigned, hasPermission } from '@/lib/rbac';
 import { Permission } from '@/lib/permissions';
 import { AccessDeniedPage } from '@/components/access-denied-page';
 
+// Permission checks already passed for the signed-in profile, so returning to a page renders it at once.
+// Keyed by the profile object: a refreshed profile (e.g. after a role change) starts with an empty record.
+const allowedFor = new WeakMap<object, Set<string>>();
+const guardKey = (one?: Permission, any?: Permission[]) => one ?? (any || []).join('|');
+
 interface RoleGuardProps {
   children: React.ReactNode;
   fallbackPath?: string;
@@ -45,7 +50,7 @@ export function RoleGuard({
     const unassigned = isUnassigned(userProfile);
     if (unassigned) return allowUnassigned ? true : null;
     if (!requirePermission && !requireAnyPermission) return true;
-    return null;
+    return allowedFor.get(userProfile)?.has(guardKey(requirePermission, requireAnyPermission)) ? true : null;
   });
   const [accessDenied, setAccessDenied] = useState(false);
 
@@ -63,6 +68,12 @@ export function RoleGuard({
       if (!userProfile) {
         return;
       }
+      const profile = userProfile;
+      const remember = () => {
+        const seen = allowedFor.get(profile) ?? new Set<string>();
+        seen.add(guardKey(requirePermission, requireAnyPermission));
+        allowedFor.set(profile, seen);
+      };
 
       // Superadmin bypasses all checks
       if (isSuperadmin(userProfile)) {
@@ -99,6 +110,7 @@ export function RoleGuard({
           router.push(fallbackPath);
           return;
         }
+        remember();
         setPermissionCheck(true);
         return;
       }
@@ -118,6 +130,7 @@ export function RoleGuard({
           router.push(fallbackPath);
           return;
         }
+        remember();
         setPermissionCheck(true);
         return;
       }
