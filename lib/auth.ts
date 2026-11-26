@@ -69,6 +69,20 @@ export async function getCurrentUser() {
   }
 }
 
+type LoadedProfile = UserProfile & {
+  user_roles: (UserRole & {
+    roles: Role & {
+      departments: Department;
+    };
+  })[];
+  department_members: DirectMembership[];
+};
+
+// One profile request at a time per person. The start-up load and the sign-in events (SIGNED_IN can fire
+// again while the first load is still waiting for the server) used to start a request loop each, and the
+// loops ran side by side for up to two minutes. Concurrent calls now share the one that is running.
+let profileInFlight: { userId: string; promise: Promise<LoadedProfile | null> } | null = null;
+
 /**
  * Get the current user's profile with roles (client-side only)
  * OPTIMIZED: Uses a single query to fetch profile + roles + permissions
@@ -76,39 +90,40 @@ export async function getCurrentUser() {
  *
  * @returns The user profile with roles or null if not found
  */
-export async function getCurrentUserProfile() {
+export async function getCurrentUserProfile(): Promise<LoadedProfile | null> {
   try {
     const user = await getCurrentUser();
     if (!user) {
       return null;
     }
 
-    // Profile with roles and direct department memberships, loaded on the server as the user
-    // Waits while the server wakes; a real answer (e.g. 401 not signed in, 404 no profile) comes back as is
-    const response = await fetchWhileServerWakes('/api/me/profile', { credentials: 'include', cache: 'no-store' });
-    if (!response.ok) {
-      return null;
-    }
-    const profile = (await response.json())?.data;
-    if (!profile) {
-      return null;
-    }
-
-    // Type the return properly
-    return profile as UserProfile & {
-      user_roles: (UserRole & {
-        roles: Role & {
-          departments: Department;
-        };
-      })[];
-      department_members: DirectMembership[];
-    };
+    const running = profileInFlight;
+    if (running && running.userId === user.id) return await running.promise;
+    const entry = { userId: user.id, promise: loadProfile() };
+    profileInFlight = entry;
+    const clear = () => { if (profileInFlight === entry) profileInFlight = null; };
+    entry.promise.then(clear, clear);
+    return await entry.promise;
   } catch (error: unknown) {
     // The server did not wake in time: say so, so the caller keeps the session instead of signing out
     if (error instanceof ServerUnavailableError) throw error;
     logger.error('Error in getCurrentUserProfile', {}, error as Error);
     return null;
   }
+}
+
+async function loadProfile(): Promise<LoadedProfile | null> {
+  // Profile with roles and direct department memberships, loaded on the server as the user
+  // Waits while the server wakes; a real answer (e.g. 401 not signed in, 404 no profile) comes back as is
+  const response = await fetchWhileServerWakes('/api/me/profile', { credentials: 'include', cache: 'no-store' });
+  if (!response.ok) {
+    return null;
+  }
+  const profile = (await response.json())?.data;
+  if (!profile) {
+    return null;
+  }
+  return profile as LoadedProfile;
 }
 
 /**

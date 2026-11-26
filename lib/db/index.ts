@@ -62,10 +62,23 @@ export function schemaName(): string | undefined {
   return schema;
 }
 
-/** Each request's statement timeout (DB_STATEMENT_TIMEOUT_MS), set inside its transaction. */
-async function setLimits(tx: Tx): Promise<void> {
+/** Each request's statement timeout (DB_STATEMENT_TIMEOUT_MS) as a setting, or none when it is not set. */
+function limits(): Array<[string, string]> {
   const ms = Number(process.env.DB_STATEMENT_TIMEOUT_MS);
-  if (Number.isInteger(ms) && ms > 0) await tx.$executeRawUnsafe(`set local statement_timeout = ${ms}`);
+  return Number.isInteger(ms) && ms > 0 ? [['statement_timeout', String(ms)]] : [];
+}
+
+/**
+ * Applies a transaction's settings (role, statement timeout, request claims) in ONE statement:
+ * select set_config(name, value, true), ...   The third argument makes each one transaction-local, exactly
+ * like `set local`, so nothing carries over to the next request on a pooled connection. Each statement is a
+ * network round trip to the database (~60 ms from Render to the shared database), so this saves two per
+ * transaction. Names and values are sent as query parameters.
+ */
+async function applySettings(tx: Tx, settings: Array<[string, string]>): Promise<void> {
+  if (settings.length === 0) return;
+  const calls = settings.map((_, i) => `set_config($${2 * i + 1}, $${2 * i + 2}, true)`).join(', ');
+  await tx.$queryRawUnsafe(`select ${calls}`, ...settings.flat());
 }
 
 /** Role server jobs run as (DB_SYSTEM_ROLE), or undefined to run as the connection's login. */
@@ -93,13 +106,15 @@ export async function withUser<T>(userId: string, fn: (tx: Tx) => Promise<T>, op
   const claims = JSON.stringify({ sub: userId, role: 'authenticated' });
   return db().$transaction(
     async (tx) => {
-      // The role name is checked above; it cannot be passed as a query parameter.
-      await tx.$executeRawUnsafe(`set local role "${role}"`);
-      await setLimits(tx);
-      await tx.$queryRaw`select set_config('request.jwt.claims', ${claims}, true),
-                                set_config('request.jwt.claim.sub', ${userId}, true),
-                                set_config('request.jwt.claim.role', 'authenticated', true),
-                                set_config('app.organization_id', ${options.organizationId ?? ''}, true)`;
+      // Same settings as `set local role` + `set local statement_timeout` + the claims, in one round trip
+      await applySettings(tx, [
+        ['role', role],
+        ...limits(),
+        ['request.jwt.claims', claims],
+        ['request.jwt.claim.sub', userId],
+        ['request.jwt.claim.role', 'authenticated'],
+        ['app.organization_id', options.organizationId ?? ''],
+      ]);
       return fn(tx);
     },
     { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
@@ -118,10 +133,12 @@ export async function withAnon<T>(fn: (tx: Tx) => Promise<T>, options: Pick<Opti
   const role = anonRole();
   return db().$transaction(
     async (tx) => {
-      await tx.$executeRawUnsafe(`set local role "${role}"`);
-      await setLimits(tx);
-      await tx.$queryRaw`select set_config('request.jwt.claims', ${JSON.stringify({ role: 'anon' })}, true),
-                                set_config('request.jwt.claim.role', 'anon', true)`;
+      await applySettings(tx, [
+        ['role', role],
+        ...limits(),
+        ['request.jwt.claims', JSON.stringify({ role: 'anon' })],
+        ['request.jwt.claim.role', 'anon'],
+      ]);
       return fn(tx);
     },
     { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
@@ -133,8 +150,7 @@ export async function withSystem<T>(fn: (tx: Tx) => Promise<T>, options: Pick<Op
   const role = systemRole();
   return db().$transaction(
     async (tx) => {
-      if (role) await tx.$executeRawUnsafe(`set local role "${role}"`);
-      await setLimits(tx);
+      await applySettings(tx, [...(role ? [['role', role] as [string, string]] : []), ...limits()]);
       return fn(tx);
     },
     { timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },

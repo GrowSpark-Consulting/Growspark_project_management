@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react'
 import { User } from '@supabase/supabase-js'
 import { createClientSupabase } from '../supabase'
 import { getCurrentUserProfile, signOut, ServerUnavailableError } from '../auth'
@@ -16,6 +16,8 @@ interface AuthContextType {
   error: string | null
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
+  /** Ask for the profile again after the server did not answer (the person stays signed in meanwhile) */
+  retryProfile: () => Promise<void>
   isAuthenticated: boolean
 }
 
@@ -30,6 +32,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // (reading the state directly would always see the first render's null)
   const profileRef = useRef<UserWithRoles | null>(null)
   useEffect(() => { profileRef.current = userProfile }, [userProfile])
+
+  // When the server did not answer, the person is signed in but has no profile and nothing is running any more:
+  // loading is false and error is set. RoleGuard says so and offers this; it also runs once by itself when the
+  // browser reports it is back online or the tab is shown again.
+  const retryProfile = useCallback(async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const profile = await getCurrentUserProfile()
+      if (profile) {
+        setUserProfile(profile)
+      } else {
+        // The server answered, and this session has no usable profile: same handling as at start-up
+        try { await createClientSupabase()?.auth.signOut() } catch { /* ignore */ }
+        setUser(null)
+        setUserProfile(null)
+      }
+    } catch {
+      setError('The server is not responding.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const waitingForServer = !loading && !!user && !userProfile && !!error
+  useEffect(() => {
+    if (!waitingForServer) return
+    const again = () => { if (document.visibilityState === 'visible') void retryProfile() }
+    window.addEventListener('online', again, { once: true })
+    document.addEventListener('visibilitychange', again, { once: true })
+    return () => {
+      window.removeEventListener('online', again)
+      document.removeEventListener('visibilitychange', again)
+    }
+  }, [waitingForServer, retryProfile])
 
   useEffect(() => {
     const supabase = createClientSupabase()
@@ -160,6 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .catch(error => {
               if (isMounted && currentProfileRequest === profileRequest) {
                 logger.error('Error loading user profile', {}, error as Error)
+                // The server did not answer: still signed in, the profile is just not there yet (RoleGuard offers a retry)
+                if (error instanceof ServerUnavailableError) setError('The server is not responding.')
                 setUserProfile(null)
                 setLoading(false)
               }
@@ -247,6 +286,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     error,
     signOut: handleSignOut,
     refreshProfile,
+    retryProfile,
     isAuthenticated: !!user,
   }
 

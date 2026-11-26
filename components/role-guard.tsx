@@ -41,7 +41,7 @@ export function RoleGuard({
   allowUnassigned = false,
   accessDeniedMessage,
 }: RoleGuardProps) {
-  const { user, userProfile, loading } = useAuth();
+  const { user, userProfile, loading, error, retryProfile } = useAuth();
   const router = useRouter();
   // Decide the cases that need no lookup right away, so opening a page does not flash "Loading..."
   const [permissionCheck, setPermissionCheck] = useState<boolean | null>(() => {
@@ -140,6 +140,20 @@ export function RoleGuard({
 
     void checkAccess();
   }, [user, userProfile, loading, router, fallbackPath, requirePermission, requireAnyPermission, allowUnassigned, accessDeniedMessage]);
+
+  // Signed in, but the profile could not be loaded because the server did not answer: the loading state has
+  // ended, so say so (waiting for a profile that is not coming would be a spinner with no end)
+  if (!loading && user && !userProfile && error) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center" role="alert">
+        <div className="text-center max-w-sm px-4">
+          <p className="text-sm font-medium text-gray-900">The server isn't responding</p>
+          <p className="mt-1 text-sm text-gray-600">You are still signed in. This page will retry when the connection is back, or you can try now.</p>
+          <button type="button" onClick={() => void retryProfile()} className="mt-3 inline-flex h-9 items-center rounded-md bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800">Try again</button>
+        </div>
+      </div>
+    );
+  }
 
   // Show loading state (but not if access was explicitly denied)
   if (!accessDenied && (loading || !user || !userProfile || permissionCheck === null)) {
