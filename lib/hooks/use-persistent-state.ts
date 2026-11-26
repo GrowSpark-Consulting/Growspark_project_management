@@ -28,6 +28,14 @@ export function usePersistentState<T>(key: string, initial: T): [T, Dispatch<Set
   return [value, set]
 }
 
+/** Remember / recall a value outside React state (same lifetime as usePersistentState). */
+export function rememberValue(key: string, value: unknown) {
+  remembered.set(key, value)
+}
+export function recallValue<T>(key: string): T | undefined {
+  return remembered.get(key) as T | undefined
+}
+
 /** Forget every remembered value (e.g. on sign-out). */
 export function clearPersistentState() {
   remembered.clear()

@@ -15,9 +15,15 @@ const DENIED: Record<string, { title: string; message: string }> = {
   forbidden: { title: 'Access Denied', message: "You don't have permission to view accounts." },
 };
 
-export default async function AccountsPage() {
-  // Access checks and data in lib/page-loaders.ts
-  const { data, denied } = settle(await loadPage('accounts', accountsPage));
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  // One page of accounts (page, pageSize, q from the URL); access checks and data in lib/page-loaders.ts
+  const sp = await searchParams;
+  const query = new URLSearchParams({ page: '1' });
+  for (const key of ['page', 'pageSize', 'q']) {
+    const value = sp[key];
+    if (typeof value === 'string' && value) query.set(key, value);
+  }
+  const { data, denied } = settle(await loadPage(`accounts?${query.toString()}`, () => accountsPage(query)));
   if (!data) {
     const { title, message } = DENIED[denied ?? ''] ?? DENIED.forbidden;
     return (
@@ -37,6 +43,8 @@ export default async function AccountsPage() {
           initialAccounts={data.accounts}
           userProfile={data.userProfile}
           isAdminLevel={data.isAdminLevel}
+          pagination={data.pagination}
+          search={data.q || ''}
         />
       </div>
     </div>

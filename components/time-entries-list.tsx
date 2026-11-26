@@ -41,11 +41,13 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Clock, Edit, Trash2, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Clock, Edit, Trash2, X } from 'lucide-react';
 import { UserWithRoles } from '@/lib/rbac';
 import { myTimeEntries, myTimeEntryFilters } from '@/lib/client-queries';
 import useSWR, { mutate as globalMutate } from 'swr';
 import { usePersistentState } from '@/lib/hooks/use-persistent-state';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { pageInfo, type PageInfo } from '@/lib/pagination';
 import { format, subDays, differenceInDays, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -74,12 +76,14 @@ interface TimeEntry {
   } | null;
 }
 
-const ENTRIES_PER_PAGE = 20;
 const EDIT_WINDOW_DAYS = 14;
 
 export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
   // Filters, sort and page are remembered while moving around the app
   const [currentPage, setCurrentPage] = usePersistentState('time-entries:page', 1);
+  const [pageSize, setPageSizeState] = usePersistentState('time-entries:pageSize', 20);
+  // A new page size starts again from page 1
+  const setPageSize = (size: number) => { setPageSizeState(size); setCurrentPage(1); };
 
   // Filters
   // Use tomorrow's date for end date to handle timezone differences
@@ -123,10 +127,10 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
 
   // The signed-in user's entries, filtered, sorted and paged by the API. Cached per filter combination:
   // coming back shows the last result at once; changing a filter keeps the current rows until the new ones arrive.
-  const { data: entriesPage, mutate: refreshEntries } = useSWR(
-    userId ? ['my-time-entries', userId, currentPage, startDate, endDate, projectFilter, taskFilter, sortBy, sortOrder] : null,
+  const { data: entriesPage, mutate: refreshEntries, isValidating } = useSWR(
+    userId ? ['my-time-entries', userId, currentPage, pageSize, startDate, endDate, projectFilter, taskFilter, sortBy, sortOrder] : null,
     async () => {
-      const offset = (currentPage - 1) * ENTRIES_PER_PAGE;
+      const offset = (currentPage - 1) * pageSize;
       const sortColumn = sortBy === 'date' ? 'entry_date' : sortBy === 'hours' ? 'hours_logged' : 'project_id';
       const { data, error, count } = await myTimeEntries({
         from: startDate,
@@ -136,7 +140,7 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
         sort: sortColumn,
         order: sortOrder === 'asc' ? 'asc' : 'desc',
         offset,
-        limit: ENTRIES_PER_PAGE,
+        limit: pageSize,
       });
       if (error) throw error;
       return { entries: (data || []) as TimeEntry[], total: count || 0 };
@@ -146,6 +150,7 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
   const entries = entriesPage?.entries ?? [];
   const totalEntries = entriesPage?.total ?? 0;
   const loading = entriesPage === undefined;
+  const refreshing = isValidating && !loading;
   // After an edit or delete: refresh this list and the other views of the user's time
   const fetchEntries = () => {
     void refreshEntries();
@@ -239,7 +244,7 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
     setCurrentPage(1);
   };
 
-  const totalPages = Math.ceil(totalEntries / ENTRIES_PER_PAGE);
+  const pagination: PageInfo = pageInfo({ page: currentPage, pageSize }, totalEntries);
 
   return (
     <Card>
@@ -427,31 +432,13 @@ export function TimeEntriesList({ userProfile }: TimeEntriesListProps) {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-600">
-              Page {currentPage} of {totalPages}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        )}
+        <PaginationBar
+          pagination={pagination}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          loading={refreshing}
+          itemLabel="entries"
+        />
       </CardContent>
 
       {/* Edit Dialog */}

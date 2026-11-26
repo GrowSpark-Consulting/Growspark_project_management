@@ -2,20 +2,24 @@
 
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/hooks/useAuth'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import useSWR from 'swr'
-import { usePersistentState } from '@/lib/hooks/use-persistent-state'
+import { useListParams } from '@/lib/hooks/use-list-params'
+import { PaginationBar } from '@/components/ui/pagination-bar'
+import { Input } from '@/components/ui/input'
+import { apiGet } from '@/lib/client-api'
+import type { PageInfo } from '@/lib/pagination'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { RoleGuard } from '@/components/role-guard'
-import { projectsList, deleteProject } from '@/lib/client-queries'
-import { FolderOpen, Plus } from 'lucide-react'
+import { deleteProject } from '@/lib/client-queries'
+import { FolderOpen, Plus, Search } from 'lucide-react'
 import ProjectCreationDialog from '@/components/project-creation-dialog'
-import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority } from '@/components/project-data-table'
+import { ProjectDataTable, ProjectTableData, ProjectStatus, ProjectPriority, type TableSort, type SortableColumn } from '@/components/project-data-table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useRouter } from 'next/navigation'
-import { hasPermission, canViewProject } from '@/lib/rbac'
+import { hasPermission } from '@/lib/rbac'
 import { Permission } from '@/lib/permissions'
 
 type Project = any
@@ -37,60 +41,45 @@ interface ProjectWithDetails extends Project {
 }
 
 
-// The projects the user can see, with departments, workflow step and team (runs on the server as the user)
-async function loadProjects(): Promise<ProjectWithDetails[]> {
-  const { data: list, error: listError } = await projectsList()
-  if (listError) throw listError
-  return (list || []) as unknown as ProjectWithDetails[]
-}
-
-// Of those, the ones this user may open (no per-project check for those who see every project)
-async function visibleFor(userProfile: any, projects: ProjectWithDetails[]): Promise<ProjectWithDetails[]> {
-  if (projects.length === 0) return []
-  if (await hasPermission(userProfile, Permission.VIEW_ALL_PROJECTS)) return projects
-  if (!(await hasPermission(userProfile, Permission.VIEW_PROJECTS))) return []
-  const accessChecks = await Promise.all(
-    projects.map(async (project) => ((await canViewProject(userProfile, project.id)) ? project : null))
-  )
-  return accessChecks.filter(Boolean) as ProjectWithDetails[]
-}
+type ProjectsPage = { data: ProjectWithDetails[]; meta: { pagination: PageInfo; departments: Department[] } }
 
 export default function ProjectsPage() {
   const { userProfile } = useAuth()
   const router = useRouter()
-  const [departmentFilter, setDepartmentFilter] = usePersistentState<string>('projects:department', 'all')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<ProjectWithDetails | null>(null)
   const [deletingProject, setDeletingProject] = useState(false)
   const [canCreateProject, setCanCreateProject] = useState(false)
 
-  // Cached by SWR: coming back to this page shows the last list at once and refreshes it in the background
+  // Search, department, sort and page live in the URL; the server filters, sorts and pages
+  // (access is checked there too, once, instead of once per project in the browser)
+  const list = useListParams('projects', { q: '', department: '', sort: '', order: '' })
+  const [searchInput, setSearchInput] = useState(list.values.q)
+  useEffect(() => { setSearchInput(list.values.q) }, [list.values.q])
+  useEffect(() => {
+    if (searchInput === list.values.q) return
+    const timer = setTimeout(() => list.update({ q: searchInput.trim() }), 350)
+    return () => clearTimeout(timer)
+  }, [searchInput, list])
+
   const userId = (userProfile as any)?.id as string | undefined
-  const { data: projectsData, error: loadError, mutate: mutateProjects } = useSWR(
-    userId ? ['projects-page', userId] : null,
-    loadProjects
-  )
-  const projects: ProjectWithDetails[] = useMemo(() => projectsData ?? [], [projectsData])
-  const projectIds = useMemo(() => projects.map((p: any) => p.id).join(','), [projects])
-  const { data: visibleData, mutate: mutateVisible } = useSWR(
-    userId && projectsData ? ['projects-page-visible', userId, projectIds] : null,
-    () => visibleFor(userProfile, projects),
+  const { data: pageData, error: loadError, isValidating, mutate: mutateProjects } = useSWR<ProjectsPage>(
+    userId ? `/api/projects/list?${list.apiQuery}` : null,
+    (url: string) => apiGet<ProjectsPage>(url),
     { keepPreviousData: true }
   )
-  const visibleProjects: ProjectWithDetails[] = visibleData ?? []
-  const loading = !userProfile || (!loadError && (projectsData === undefined || visibleData === undefined))
+  const visibleProjects: ProjectWithDetails[] = pageData?.data ?? []
+  const allDepartments: Department[] = pageData?.meta?.departments ?? []
+  const departmentFilter = list.values.department || 'all'
+  const loading = !userProfile || (!loadError && pageData === undefined)
   const error = loadError ? 'Failed to load projects' : null
-
-  // Departments of all projects, for the filter dropdown
-  const allDepartments = useMemo(() => {
-    const departmentsMap = new Map<string, Department>()
-    projects.forEach((project: any) => {
-      (project.departments || []).forEach((dept: any) => {
-        if (!departmentsMap.has(dept.id)) departmentsMap.set(dept.id, dept)
-      })
-    })
-    return Array.from(departmentsMap.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [projects])
+  const filtering = !!(list.values.q || list.values.department)
+  const tableSort: TableSort = {
+    column: (list.values.sort || null) as SortableColumn | null,
+    direction: list.values.sort ? (list.values.order === 'desc' ? 'desc' : 'asc') : null,
+  }
+  const setDepartmentFilter = (value: string) => list.update({ department: value === 'all' ? '' : value })
+  const setTableSort = (next: TableSort) => list.update({ sort: next.column || '', order: next.column && next.direction === 'desc' ? 'desc' : '' })
 
   // Handle project creation: show it at once, then refresh the list for its complete data
   const handleProjectCreated = useCallback((newProject: any) => {
@@ -112,10 +101,10 @@ export default function ProjectsPage() {
         departments: [],
         workflow_step: null,
       } as unknown as ProjectWithDetails
-      void mutateVisible((prev) => [projectWithDetails, ...(prev || [])], { revalidate: false })
+      void mutateProjects((prev) => prev ? { ...prev, data: [projectWithDetails, ...prev.data] } : prev, { revalidate: false })
     }
     void mutateProjects()
-  }, [mutateVisible, mutateProjects])
+  }, [mutateProjects])
 
   // Check create project permission (using consolidated MANAGE_PROJECTS)
   useEffect(() => {
@@ -188,9 +177,9 @@ export default function ProjectsPage() {
         throw error
       }
 
-      // Remove it from the list right away, then refresh the cached list
+      // Remove it from the list right away, then refresh the page from the server
       const deletedId = projectToDelete.id
-      void mutateVisible((prev) => (prev || []).filter((p: any) => p.id !== deletedId), { revalidate: false })
+      void mutateProjects((prev) => prev ? { ...prev, data: prev.data.filter((p: any) => p.id !== deletedId) } : prev, { revalidate: false })
       void mutateProjects()
 
       // Close dialog and reset state
@@ -203,12 +192,8 @@ export default function ProjectsPage() {
     }
   }
 
-  // Filter projects by department (use visibleProjects which are already permission-filtered)
+  // The server already applied access, search and the department filter
   const filteredProjects = visibleProjects
-    .filter((project: any) => {
-      if (departmentFilter !== 'all' && !project.departments.some((dept: any) => dept.id === departmentFilter)) return false
-      return true
-    })
 
   if (loading) {
     return (
@@ -266,41 +251,69 @@ export default function ProjectsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
+                {/* Search and department filter (server-side) */}
+                {(visibleProjects.length > 0 || filtering) && (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="relative w-full sm:w-72">
+                      <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        placeholder="Search projects"
+                        aria-label="Search projects"
+                        className="pl-8"
+                      />
+                    </div>
+                    {allDepartments.length > 0 && (
+                      <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Filter by Department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Departments</SelectItem>
+                          {allDepartments.map((dept: any) => (
+                            <SelectItem key={dept.id} value={dept.id}>
+                              {dept.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+
                 {visibleProjects.length === 0 ? (
                   <div className="text-center py-12 text-gray-500">
                     <FolderOpen className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Projects Found</h3>
-                    <p className="text-sm">You don&apos;t have access to any projects yet, or no projects have been created.</p>
+                    {filtering ? (
+                      <>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">No matching projects</h3>
+                        <p className="text-sm">Try another search or department.</p>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">No Projects Found</h3>
+                        <p className="text-sm">You don&apos;t have access to any projects yet, or no projects have been created.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
-                  <>
-                    {/* Department Filter */}
-                    {allDepartments.length > 0 && (
-                      <div className="mb-4">
-                        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                          <SelectTrigger className="w-[200px]">
-                            <SelectValue placeholder="Filter by Department" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Departments</SelectItem>
-                            {allDepartments.map((dept: any) => (
-                              <SelectItem key={dept.id} value={dept.id}>
-                                {dept.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {/* Projects Table */}
-                    <ProjectDataTable
-                      projects={transformToTableData(filteredProjects)}
-                      defaultVisibleColumns={['name', 'workflowStep', 'priority', 'account', 'hours', 'deadline', 'assignedUsers', 'status']}
-                      onRowClick={(project) => router.push(`/projects/${project.id}`)}
-                    />
-                  </>
+                  <ProjectDataTable
+                    projects={transformToTableData(filteredProjects)}
+                    defaultVisibleColumns={['name', 'workflowStep', 'priority', 'account', 'hours', 'deadline', 'assignedUsers', 'status']}
+                    onRowClick={(project) => router.push(`/projects/${project.id}`)}
+                    sort={tableSort}
+                    onSortChange={setTableSort}
+                  />
                 )}
+
+                <PaginationBar
+                  pagination={pageData?.meta?.pagination}
+                  onPageChange={list.setPage}
+                  onPageSizeChange={list.setPageSize}
+                  loading={isValidating && !!pageData}
+                  itemLabel="projects"
+                />
             </div>
           </CardContent>
         </Card>

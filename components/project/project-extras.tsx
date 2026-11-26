@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useCursorFeed } from '@/lib/hooks/use-cursor-feed';
 import useSWR from 'swr';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -207,9 +208,15 @@ function Deliverables({ projectId, access, readOnly }: { projectId: string; acce
 }
 
 function Documents({ projectId, access }: { projectId: string; access: any }) {
-  const { data, mutate } = useSWR(`/api/projects/${projectId}/files`, jsonFetcher);
+  // Newest 20 first, older ones on "Load more" (keyset pages on the server)
+  const feed = useCursorFeed<any, any>(
+    `/api/projects/${projectId}/files`,
+    (body) => ({ items: body?.data || [], nextCursor: body?.meta?.nextCursor ?? null, hasMore: !!body?.meta?.hasMore }),
+    jsonFetcher,
+  );
+  const mutate = feed.refresh;
   const [uploading, setUploading] = useState(false);
-  const files: any[] = data?.data || [];
+  const files: any[] = feed.items;
   const upload = async (f?: File) => {
     if (!f) return;
     setUploading(true);
@@ -236,6 +243,11 @@ function Documents({ projectId, access }: { projectId: string; access: any }) {
           {(access.canManage || f.uploaded_by === access.me) && <button onClick={() => remove(f.id)} className="text-red-500"><Trash2 className="h-4 w-4" /></button>}
         </div>
       ))}
+      {feed.hasMore && (
+        <Button size="sm" variant="outline" onClick={() => feed.loadMore()} disabled={feed.loadingMore}>
+          {feed.loadingMore ? 'Loading…' : 'Load more'}
+        </Button>
+      )}
       {access.canContribute && (
         <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-blue-600">
           <Upload className="h-4 w-4" />{uploading ? 'Uploading…' : 'Upload document (max 10 MB)'}

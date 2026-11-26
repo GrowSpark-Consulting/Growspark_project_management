@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useListParams } from '@/lib/hooks/use-list-params';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { toast } from 'sonner';
@@ -28,24 +30,30 @@ const VIEWS = [
 ];
 
 export default function MyTasksPage() {
-  const [view, setView] = useState('assigned');
-  const [projectId, setProjectId] = useState('all');
-  const [priority, setPriority] = useState('all');
-  const [status, setStatus] = useState('all');
-  const [due, setDue] = useState('all');
-  const [q, setQ] = useState('');
+  // View, filters, search and page live in the URL; the server filters, sorts and pages
+  const list = useListParams('my-tasks', { view: 'assigned', projectId: '', priority: '', status: '', due: '', q: '' });
+  const { view, projectId: projectFilter, priority: priorityFilter, status: statusFilter, due: dueFilter } = list.values;
+  const projectId = projectFilter || 'all';
+  const priority = priorityFilter || 'all';
+  const status = statusFilter || 'all';
+  const due = dueFilter || 'all';
+  const pick = (key: 'view' | 'projectId' | 'priority' | 'status' | 'due') => (value: string) => list.update({ [key]: value === 'all' ? '' : value });
+  const setView = pick('view');
+  const setProjectId = pick('projectId');
+  const setPriority = pick('priority');
+  const setStatus = pick('status');
+  const setDue = pick('due');
+  const [q, setQ] = useState(list.values.q);
+  useEffect(() => { setQ(list.values.q); }, [list.values.q]);
+  useEffect(() => {
+    if (q.trim() === list.values.q) return;
+    const timer = setTimeout(() => list.update({ q: q.trim() }), 350);
+    return () => clearTimeout(timer);
+  }, [q, list]);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const query = useMemo(() => {
-    const p = new URLSearchParams({ view });
-    if (projectId !== 'all') p.set('projectId', projectId);
-    if (priority !== 'all') p.set('priority', priority);
-    if (status !== 'all') p.set('status', status);
-    if (due !== 'all') p.set('due', due);
-    if (q.trim()) p.set('q', q.trim());
-    return `/api/me/tasks?${p.toString()}`;
-  }, [view, projectId, priority, status, due, q]);
-  const { data, error, isLoading, mutate } = useSWR(query, jsonFetcher, { keepPreviousData: true });
+  const query = `/api/me/tasks?${list.apiQuery}`;
+  const { data, error, isLoading, isValidating, mutate } = useSWR(query, jsonFetcher, { keepPreviousData: true });
   const tasks: any[] = data?.data || [];
   const counts = data?.meta?.counts || {};
   const projects: any[] = data?.meta?.projects || [];
@@ -143,6 +151,14 @@ export default function MyTasksPage() {
               })}
             </ul>
           )}
+          <PaginationBar
+            className="px-3 pb-3"
+            pagination={data?.meta?.pagination}
+            onPageChange={list.setPage}
+            onPageSizeChange={list.setPageSize}
+            loading={isValidating && !!data}
+            itemLabel="tasks"
+          />
         </CardContent>
       </Card>
 

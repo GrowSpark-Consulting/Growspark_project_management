@@ -9,9 +9,10 @@ export const dynamic = 'force-dynamic';
  * server (Vercel), which has no database (lib/page-data.ts). Same sign-in cookies, same access rules
  * as when the page loads it itself: the answer is what that page would have rendered for this visitor.
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  const load = loaderFor(path);
+  // The page's own query (e.g. ?page=2&q=acme) is passed on to its loader
+  const load = loaderFor(path, request.nextUrl.searchParams);
   if (!load) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   try {
     return NextResponse.json(await load(), { headers: { 'Cache-Control': 'private, no-store' } });

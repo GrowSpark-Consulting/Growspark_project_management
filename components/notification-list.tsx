@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
+import { useCursorFeed } from '@/lib/hooks/use-cursor-feed';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,8 +15,19 @@ import { Bell, CheckCheck } from 'lucide-react';
 export function NotificationList() {
   const router = useRouter();
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const { data, isLoading, mutate } = useSWR(`/api/notifications?limit=200${unreadOnly ? '&unread=1' : ''}`, jsonFetcher, { refreshInterval: 60000 });
-  const items: any[] = data?.data || [];
+  // Newest 20 first, older ones on "Load more" (keyset pages on the server)
+  const feed = useCursorFeed<any, any>(
+    `/api/notifications${unreadOnly ? '?unread=1' : ''}`,
+    (body) => ({ items: body?.data || [], nextCursor: body?.meta?.nextCursor ?? null, hasMore: !!body?.meta?.hasMore }),
+    jsonFetcher,
+    20,
+    { refreshInterval: 60000 }
+  );
+  // The unread count (same request the bell makes, so it is shared)
+  const { data, mutate: mutateCount } = useSWR('/api/notifications?limit=10', jsonFetcher);
+  const items: any[] = feed.items;
+  const isLoading = feed.isLoading;
+  const mutate = () => { feed.refresh(); mutateCount(); };
   const open = async (n: any) => {
     if (!n.read) { await apiSend('/api/notifications', 'POST', { ids: [n.id] }).catch(() => undefined); mutate(); }
     if (n.link) router.push(n.link);
@@ -51,6 +63,13 @@ export function NotificationList() {
                 </li>
               ))}
             </ul>
+          )}
+          {feed.hasMore && (
+            <div className="border-t p-3 text-center">
+              <Button size="sm" variant="outline" onClick={() => feed.loadMore()} disabled={feed.loadingMore}>
+                {feed.loadingMore ? 'Loading…' : 'Load more'}
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -1,20 +1,38 @@
 import { api, ok, HttpError } from '@/lib/api/context'
+import { wantsPage, readPage, pageInfo, searchTerm } from '@/lib/pagination'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // GET /api/admin/users?type=internal|client|all - user management list
+// With page/pageSize (20, 50, 100): one page of users (by name) plus `pagination`; q searches name, email and
+// client account name; inactive=0 hides deactivated users. Roles, departments and accounts are loaded for the
+// page's users only. Without page/pageSize: every user (as before).
 // Each user carries their departments: directly added (department_members, editable here) and
 // through a department role (shown, changed by changing the role).
 export const GET = api(async (request, ctx) => {
   if (!ctx.isSuperadmin && !ctx.has('manage_users') && !ctx.has('manage_user_roles')) {
     throw new HttpError(403, 'You need manage_users or manage_user_roles')
   }
-  const type = new URL(request.url).searchParams.get('type') || 'all'
+  const sp = new URL(request.url).searchParams
+  const type = sp.get('type') || 'all'
+  const paged = wantsPage(sp)
+  const pageRequest = readPage(sp)
   let query = ctx.admin.from('user_profiles')
-    .select('id, name, email, phone, is_active, is_client, is_superadmin, client_account_id, deactivated_at, suspended_until, suspension_reason, created_at')
+    .select('id, name, email, phone, is_active, is_client, is_superadmin, client_account_id, deactivated_at, suspended_until, suspension_reason, created_at', paged ? { count: 'exact' } : undefined)
     .order('name')
+    .order('id')
   if (type === 'internal') query = query.eq('is_client', false)
   if (type === 'client') query = query.eq('is_client', true)
-  const { data: users } = await query
+  if (paged) {
+    if (sp.get('inactive') === '0') query = query.neq('is_active', false)
+    const q = searchTerm(sp)
+    if (q) {
+      // Clients are also found by the name of their account
+      const { data: accountMatches } = await ctx.admin.from('accounts').select('id').ilike('name', `*${q}*`)
+      const accountIds = (accountMatches || []).map((a: any) => a.id)
+      query = query.or(`name.ilike.*${q}*,email.ilike.*${q}*${accountIds.length ? `,client_account_id.in.(${accountIds.join(',')})` : ''}`)
+    }
+  }
+  const { data: users, count } = paged ? await query.range(pageRequest.from, pageRequest.to) : await query
   const ids = (users || []).map((u: any) => u.id)
   const [{ data: roles }, { data: accounts }, { data: departments }, members] = await Promise.all([
     ids.length ? ctx.admin.from('user_roles').select('user_id, roles!user_roles_role_id_fkey(name, department_id)').in('user_id', ids) : Promise.resolve({ data: [] }),
@@ -41,5 +59,5 @@ export const GET = api(async (request, ctx) => {
       }
     }),
     departments: departments || [],
-  })
+  }, 200, paged ? { pagination: pageInfo(pageRequest, count || 0) } : undefined)
 })

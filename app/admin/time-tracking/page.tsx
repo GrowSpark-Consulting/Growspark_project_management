@@ -1,6 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import useSWR from 'swr'
+import { useListParams } from '@/lib/hooks/use-list-params'
+import { PaginationBar } from '@/components/ui/pagination-bar'
+import type { PageInfo } from '@/lib/pagination'
 import { useAuth } from '@/lib/hooks/useAuth'
 import { timeTrackingFilters } from '@/lib/client-queries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -50,18 +54,37 @@ interface Summary {
 
 export default function AdminTimeTrackingPage() {
   const { userProfile } = useAuth()
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([])
-  const [summary, setSummary] = useState<Summary | null>(null)
-  const [loading, setLoading] = useState(true)
   const [checkingAccess, setCheckingAccess] = useState(true)
   const [hasAccess, setHasAccess] = useState(false)
 
-  // Filters
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [selectedUser, setSelectedUser] = useState('')
+  // Filters and page live in the URL (?startDate=&endDate=&userId=&page=&pageSize=)
+  const list = useListParams('admin-time-tracking', { startDate: '', endDate: '', userId: '' })
+  const [startDate, setStartDate] = useState(list.values.startDate)
+  const [endDate, setEndDate] = useState(list.values.endDate)
+  const [selectedUser, setSelectedUser] = useState(list.values.userId)
+  useEffect(() => {
+    setStartDate(list.values.startDate)
+    setEndDate(list.values.endDate)
+    setSelectedUser(list.values.userId)
+  }, [list.values.startDate, list.values.endDate, list.values.userId])
   const [users, setUsers] = useState<{ id: string; name: string }[]>([])
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
+
+  // One page of entries plus totals over every matching entry (server-side)
+  const { data: pageData, isLoading, isValidating, mutate: reloadEntries } = useSWR<{ success: boolean; timeEntries: TimeEntry[]; summary: Summary; pagination: PageInfo; error?: string }>(
+    hasAccess ? `/api/admin/time-entries?${list.apiQuery}` : null,
+    async (url: string) => {
+      const response = await fetch(url)
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok || !body.success) throw new Error(body.error || 'Failed to load time entries')
+      return body
+    },
+    { keepPreviousData: true, onError: () => toast.error('Failed to load time entries') }
+  )
+  const timeEntries = pageData?.timeEntries ?? []
+  const summary = pageData?.summary ?? null
+  const loading = isLoading && !pageData
+  const loadTimeEntries = useCallback(() => { void reloadEntries() }, [reloadEntries])
 
   // Edit dialog state
   const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null)
@@ -106,34 +129,6 @@ export default function AdminTimeTrackingPage() {
     }
   }, [])
 
-  const loadTimeEntries = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      if (startDate) params.set('startDate', startDate)
-      if (endDate) params.set('endDate', endDate)
-      if (selectedUser && selectedUser !== 'all') params.set('userId', selectedUser)
-
-      const response = await fetch(`/api/admin/time-entries?${params.toString()}`)
-      if (!response.ok) {
-        toast.error('Failed to load time entries')
-        return
-      }
-      const data = await response.json()
-
-      if (data.success) {
-        setTimeEntries(data.timeEntries)
-        setSummary(data.summary)
-      } else {
-        toast.error(data.error || 'Failed to load time entries')
-      }
-    } catch (error: unknown) {
-      toast.error('Failed to load time entries')
-    } finally {
-      setLoading(false)
-    }
-  }, [startDate, endDate, selectedUser])
-
   // Check permissions - Phase 9: VIEW_TEAM_TIME_ENTRIES → VIEW_ALL_TIME_ENTRIES
   useEffect(() => {
     const checkAccess = async () => {
@@ -142,18 +137,17 @@ export default function AdminTimeTrackingPage() {
         setHasAccess(canView)
         setCheckingAccess(false)
         if (canView) {
-          loadTimeEntries()
           loadUsers()
           loadProjects()
         }
       }
     }
     checkAccess()
-  }, [userProfile, loadTimeEntries, loadUsers, loadProjects])
+  }, [userProfile, loadUsers, loadProjects])
 
-  // Apply filters
+  // Apply filters (back to page 1)
   const handleApplyFilters = () => {
-    loadTimeEntries()
+    list.update({ startDate, endDate, userId: selectedUser === 'all' ? '' : selectedUser })
   }
 
   // Clear filters
@@ -161,7 +155,7 @@ export default function AdminTimeTrackingPage() {
     setStartDate('')
     setEndDate('')
     setSelectedUser('')
-    setTimeout(loadTimeEntries, 0)
+    list.update({ startDate: '', endDate: '', userId: '' })
   }
 
   // Format time
@@ -189,10 +183,21 @@ export default function AdminTimeTrackingPage() {
     })
   }
 
-  // Export to CSV
-  const exportToCSV = () => {
+  // Export to CSV: every entry matching the filters, not just the page on screen
+  const exportToCSV = async () => {
+    const params = new URLSearchParams()
+    if (list.values.startDate) params.set('startDate', list.values.startDate)
+    if (list.values.endDate) params.set('endDate', list.values.endDate)
+    if (list.values.userId) params.set('userId', list.values.userId)
+    const response = await fetch(`/api/admin/time-entries?${params.toString()}`)
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok || !body.success) {
+      toast.error('Failed to export time entries')
+      return
+    }
+    const allEntries: TimeEntry[] = body.timeEntries || []
     const headers = ['Date', 'User', 'Project', 'Task', 'Hours', 'Clock In', 'Clock Out', 'Auto Clock Out', 'Description']
-    const rows = timeEntries.map((entry: any) => [
+    const rows = allEntries.map((entry: any) => [
       entry.entry_date,
       entry.user?.name || 'Unknown',
       entry.project?.name || 'N/A',
@@ -392,7 +397,7 @@ export default function AdminTimeTrackingPage() {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-gray-500">User</label>
-              <Select value={selectedUser} onValueChange={setSelectedUser}>
+              <Select value={selectedUser || 'all'} onValueChange={setSelectedUser}>
                 <SelectTrigger className="w-48">
                   <SelectValue placeholder="All Users" />
                 </SelectTrigger>
@@ -509,6 +514,14 @@ export default function AdminTimeTrackingPage() {
               </TableBody>
             </Table>
           )}
+          <PaginationBar
+            className="px-4 pb-4"
+            pagination={pageData?.pagination}
+            onPageChange={list.setPage}
+            onPageSizeChange={list.setPageSize}
+            loading={isValidating && !!pageData}
+            itemLabel="entries"
+          />
         </CardContent>
       </Card>
 

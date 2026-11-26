@@ -5,6 +5,7 @@ import { Permission } from '@/lib/permissions';
 import { notify, getProjectTeamIds, getProjectClientIds } from '@/lib/notify';
 import { logger } from '@/lib/debug-logger';
 import { isValidUUID } from '@/lib/validation-helpers';
+import { readCursor, applyCursor, cursorPage } from '@/lib/pagination';
 
 /**
  * GET /api/projects/[projectId]/updates
@@ -59,9 +60,13 @@ export async function GET(
       return NextResponse.json({ error: 'Insufficient permissions to view project updates' }, { status: 403 });
     }
 
-    // Get updates with user info
+    // Get updates with user info, newest first. With limit/cursor: one chunk plus nextCursor / hasMore
+    // ("Load more"); without: every update (as before).
     // Note: workflow_history relationship is optional and fetched separately if needed
-    const { data: updates, error } = await supabase
+    const sp = new URL(request.url).searchParams;
+    const chunked = sp.has('limit') || sp.has('cursor');
+    const page = readCursor(sp);
+    const listQuery = supabase
       .from('project_updates')
       .select(`
         id,
@@ -74,14 +79,20 @@ export async function GET(
         updated_at,
         user_profiles:created_by(id, name, email, image, is_client)
       `)
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
+      .eq('project_id', projectId);
+    const { data: updates, error } = chunked
+      ? await applyCursor(listQuery, page)
+      : await listQuery.order('created_at', { ascending: false });
 
     if (error) {
       logger.error('Error fetching updates:', {}, error as unknown as Error);
       return NextResponse.json({ error: 'Failed to fetch updates' }, { status: 500 });
     }
 
+    if (chunked) {
+      const { rows, cursor } = cursorPage(updates || [], page);
+      return NextResponse.json({ updates: rows, nextCursor: cursor.nextCursor, hasMore: cursor.hasMore });
+    }
     return NextResponse.json({ updates: updates || [] });
   } catch (error: unknown) {
     logger.error('Error in GET /api/projects/[projectId]/updates:', {}, error as Error);

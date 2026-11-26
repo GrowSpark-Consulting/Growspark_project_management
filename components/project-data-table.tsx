@@ -54,8 +54,9 @@ export interface ProjectTableData {
   status: ProjectStatus;
 }
 
-type SortDirection = "asc" | "desc" | null;
-type SortableColumn = "name" | "priority" | "account" | "deadline" | "status";
+export type SortDirection = "asc" | "desc" | null;
+export type SortableColumn = "name" | "priority" | "account" | "deadline" | "status";
+export type TableSort = { column: SortableColumn | null; direction: SortDirection };
 
 // --- PROPS INTERFACE ---
 interface ProjectDataTableProps {
@@ -63,6 +64,9 @@ interface ProjectDataTableProps {
   defaultVisibleColumns?: (keyof ProjectTableData)[];
   onRowClick?: (project: ProjectTableData) => void;
   showColumnToggle?: boolean;
+  /** Server-sorted lists (paged): the current sort, and what to do when a header is clicked */
+  sort?: TableSort;
+  onSortChange?: (sort: TableSort) => void;
 }
 
 // --- STATUS BADGE VARIANTS (Brand Colors) ---
@@ -213,6 +217,8 @@ export const ProjectDataTable = ({
   defaultVisibleColumns = ["name", "workflowStep", "priority", "account", "hours", "deadline", "assignedUsers", "status"],
   onRowClick,
   showColumnToggle = true,
+  sort,
+  onSortChange,
 }: ProjectDataTableProps) => {
   // Column visibility state
   const [visibleColumns, setVisibleColumns] = useState<Set<keyof ProjectTableData>>(
@@ -220,10 +226,13 @@ export const ProjectDataTable = ({
   );
 
   // Sorting state
-  const [sortConfig, setSortConfig] = useState<{ column: SortableColumn | null; direction: SortDirection }>({
+  // With onSortChange the server sorts (paged lists): the table only shows and reports the sort
+  const [localSort, setLocalSort] = useState<TableSort>({
     column: null,
     direction: null,
   });
+  const serverSorted = !!onSortChange;
+  const sortConfig: TableSort = serverSorted ? (sort ?? { column: null, direction: null }) : localSort;
 
   // Handle column visibility toggle
   const toggleColumn = (column: keyof ProjectTableData) => {
@@ -242,20 +251,19 @@ export const ProjectDataTable = ({
 
   // Handle sorting
   const handleSort = (column: SortableColumn) => {
-    setSortConfig((prev) => {
-      if (prev.column !== column) {
-        return { column, direction: "asc" };
-      }
-      if (prev.direction === "asc") {
-        return { column, direction: "desc" };
-      }
-      return { column: null, direction: null };
-    });
+    const prev = sortConfig;
+    const next: TableSort = prev.column !== column
+      ? { column, direction: "asc" }
+      : prev.direction === "asc"
+        ? { column, direction: "desc" }
+        : { column: null, direction: null };
+    if (onSortChange) onSortChange(next);
+    else setLocalSort(next);
   };
 
   // Sort projects
   const sortedProjects = useMemo(() => {
-    if (!sortConfig.column || !sortConfig.direction) {
+    if (serverSorted || !sortConfig.column || !sortConfig.direction) {
       return projects;
     }
 
@@ -285,7 +293,8 @@ export const ProjectDataTable = ({
 
       return direction === "desc" ? -comparison : comparison;
     });
-  }, [projects, sortConfig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- column and direction are the whole sort
+  }, [projects, sortConfig.column, sortConfig.direction, serverSorted]);
 
   // Animation variants for table rows
   const rowVariants = {

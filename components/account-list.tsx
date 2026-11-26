@@ -19,15 +19,29 @@ import { Permission } from '@/lib/permissions';
 import { hasAccountAccess } from '@/lib/permission-checker';
 import { format } from 'date-fns';
 import { AccountCreateDialog } from '@/components/account-create-dialog';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { useListParams } from '@/lib/hooks/use-list-params';
+import type { PageInfo } from '@/lib/pagination';
 
 interface AccountListProps {
   accounts: Account[];
   userProfile: UserWithRoles;
   onAccountCreated?: () => void;
+  /** Server-paged list: the page info and the search the server applied (search and pages then go via the URL) */
+  pagination?: PageInfo;
+  search?: string;
 }
 
-export function AccountList({ accounts, userProfile, onAccountCreated }: AccountListProps) {
-  const [searchTerm, setSearchTerm] = useState('');
+export function AccountList({ accounts, userProfile, onAccountCreated, pagination, search = '' }: AccountListProps) {
+  const serverPaged = !!pagination;
+  const list = useListParams('accounts', { q: '' }, { serverRendered: true });
+  const [searchTerm, setSearchTerm] = useState(serverPaged ? search : '');
+  // Server-paged: send the search to the server (debounced); it answers with page 1 of the matches
+  useEffect(() => {
+    if (!serverPaged || searchTerm.trim() === search) return;
+    const timer = setTimeout(() => list.update({ q: searchTerm.trim() }), 400);
+    return () => clearTimeout(timer);
+  }, [serverPaged, searchTerm, search, list]);
   const [canCreateAccount, setCanCreateAccount] = useState(false);
   const [hasManageAccountsPermission, setHasManageAccountsPermission] = useState(false);
   // Accounts are pre-filtered by the server page component — trust the passed data
@@ -51,7 +65,7 @@ export function AccountList({ accounts, userProfile, onAccountCreated }: Account
     setVisibleAccounts(accounts);
   }, [accounts]);
 
-  const filteredAccounts = visibleAccounts.filter((account: any) =>
+  const filteredAccounts = serverPaged ? visibleAccounts : visibleAccounts.filter((account: any) =>
     account.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     account.primary_contact_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     account.description?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -71,7 +85,7 @@ export function AccountList({ accounts, userProfile, onAccountCreated }: Account
   };
 
 
-  if (visibleAccounts.length === 0) {
+  if (visibleAccounts.length === 0 && !(serverPaged && search)) {
     return (
       <Card>
         <CardHeader>
@@ -211,6 +225,13 @@ export function AccountList({ accounts, userProfile, onAccountCreated }: Account
           </Card>
         ))}
       </div>
+
+      <PaginationBar
+        pagination={pagination}
+        onPageChange={list.setPage}
+        onPageSizeChange={list.setPageSize}
+        itemLabel="accounts"
+      />
 
       {/* No Results */}
       {filteredAccounts.length === 0 && searchTerm && (

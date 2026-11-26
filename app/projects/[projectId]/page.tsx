@@ -270,6 +270,9 @@ export default function ProjectDetailPage() {
   // Project Updates State
   const [projectUpdates, setProjectUpdates] = useState<ProjectUpdate[]>(cached?.updates ?? [])
   const [loadingUpdates, setLoadingUpdates] = useState(!cached?.updates)
+  // Updates come newest first, 20 at a time; older ones on "Load more"
+  const [updatesCursor, setUpdatesCursor] = useState<string | null>(null)
+  const [loadingMoreUpdates, setLoadingMoreUpdates] = useState(false)
   const [showNewUpdateForm, setShowNewUpdateForm] = useState(false)
   const [newUpdateContent, setNewUpdateContent] = useState('')
   const [submittingUpdate, setSubmittingUpdate] = useState(false)
@@ -730,10 +733,11 @@ export default function ProjectDetailPage() {
 
       // Refresh updates (in case workflow added any updates)
       try {
-        const updatesResponse = await fetch(`/api/projects/${projectId}/updates`)
+        const updatesResponse = await fetch(`/api/projects/${projectId}/updates?limit=20`)
         const updatesResult = await updatesResponse.json()
         if (updatesResponse.ok) {
           setProjectUpdates(updatesResult.updates)
+          setUpdatesCursor(updatesResult.hasMore ? updatesResult.nextCursor : null)
         }
       } catch (_updatesErr) {
         // Error refreshing updates - silently handled
@@ -1140,11 +1144,12 @@ export default function ProjectDetailPage() {
 
     if (!projectPageCache.get(projectId)?.updates) setLoadingUpdates(true)
     try {
-      const response = await fetch(`/api/projects/${projectId}/updates`)
+      const response = await fetch(`/api/projects/${projectId}/updates?limit=20`)
       const result = await response.json()
 
       if (response.ok) {
         setProjectUpdates(result.updates)
+        setUpdatesCursor(result.hasMore ? result.nextCursor : null)
       }
     } catch (_error: unknown) {
       // Error loading project updates - silently handled
@@ -1152,6 +1157,24 @@ export default function ProjectDetailPage() {
       setLoadingUpdates(false)
     }
   }, [projectId])
+
+  // The next 20 older updates
+  const loadMoreUpdates = async () => {
+    if (!updatesCursor) return
+    setLoadingMoreUpdates(true)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/updates?limit=20&cursor=${encodeURIComponent(updatesCursor)}`)
+      const result = await response.json()
+      if (response.ok) {
+        setProjectUpdates((prev) => [...prev, ...result.updates.filter((u: ProjectUpdate) => !prev.some((p) => p.id === u.id))])
+        setUpdatesCursor(result.hasMore ? result.nextCursor : null)
+      }
+    } catch (_error: unknown) {
+      toast.error('Failed to load older updates')
+    } finally {
+      setLoadingMoreUpdates(false)
+    }
+  }
 
   // Load updates when project is loaded (only re-run when project ID changes, not on every property update)
   useEffect(() => {
@@ -1904,6 +1927,13 @@ export default function ProjectDetailPage() {
                           </div>
                         </div>
                       ))}
+                      {updatesCursor && (
+                        <div className="relative z-10 pl-14">
+                          <Button variant="outline" size="sm" onClick={loadMoreUpdates} disabled={loadingMoreUpdates}>
+                            {loadingMoreUpdates ? 'Loading…' : 'Load older updates'}
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-8 text-gray-400">

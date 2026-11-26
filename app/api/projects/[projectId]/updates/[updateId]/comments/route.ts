@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { api, readJson, requireProject, ok, HttpError, assertUuid } from '@/lib/api/context'
-import { listComments, createComment } from '@/lib/comments'
+import { listComments, listCommentThreads, createComment } from '@/lib/comments'
+import { readCursor } from '@/lib/pagination'
 import { getProjectClientIds } from '@/lib/notify'
 
 const schema = z.object({
@@ -17,9 +18,15 @@ async function getUpdate(ctx: Parameters<typeof requireProject>[0], projectId: s
 }
 
 // GET /api/projects/[projectId]/updates/[updateId]/comments
-export const GET = api<{ projectId: string; updateId: string }>(async (_request, ctx, params) => {
+export const GET = api<{ projectId: string; updateId: string }>(async (request, ctx, params) => {
   await requireProject(ctx, params.projectId, 'view')
   const update = await getUpdate(ctx, params.projectId, params.updateId)
+  // With limit/cursor: a chunk of the newest threads (meta.nextCursor / meta.hasMore); without: every comment
+  const sp = new URL(request.url).searchParams
+  if (sp.has('limit') || sp.has('cursor')) {
+    const { comments, nextCursor, hasMore } = await listCommentThreads(ctx.admin, { updateId: update.id }, readCursor(sp))
+    return ok(comments, 200, { nextCursor, hasMore })
+  }
   return ok(await listComments(ctx.admin, { updateId: update.id }))
 })
 

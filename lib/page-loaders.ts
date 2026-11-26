@@ -3,6 +3,7 @@
  * that used to sit in the page itself, unchanged; it runs where the database is: in the page on
  * Render or locally, or behind GET /api/pages/<path> for the frontend-only server (lib/page-data.ts).
  */
+import { wantsPage, readPage, pageInfo, searchTerm, type PageInfo } from '@/lib/pagination';
 import { createServerSupabase, createAdminSupabaseClient } from '@/lib/supabase-server';
 import { getCurrentUserProfileServer } from '@/lib/auth-server';
 import { accountService } from '@/lib/account-service';
@@ -104,7 +105,11 @@ type Profile = NonNullable<Awaited<ReturnType<typeof getCurrentUserProfileServer
 /** Accounts list. Denied reasons: database, login, forbidden. */
 type Accounts = Awaited<ReturnType<typeof accountService.getAllAccounts>>;
 
-export async function accountsPage(): Promise<PageOutcome<{ userProfile: Profile; isAdminLevel: boolean; accounts: Accounts }>> {
+/**
+ * With page/pageSize in `params` (and optional q): one page of the visible accounts, searched and paged by
+ * the database, plus `pagination`. Without: every visible account (as before).
+ */
+export async function accountsPage(params?: URLSearchParams): Promise<PageOutcome<{ userProfile: Profile; isAdminLevel: boolean; accounts: Accounts; pagination?: PageInfo; q?: string }>> {
   // Server-side Supabase client with auth first (needed for permission checks)
   const supabase = await createServerSupabase();
   if (!supabase) return denied('database');
@@ -119,6 +124,20 @@ export async function accountsPage(): Promise<PageOutcome<{ userProfile: Profile
 
   // Admin client for reads; the permission checks above decide what is shown
   const adminClient = createAdminSupabaseClient();
+  if (params && wantsPage(params)) {
+    const page = readPage(params);
+    const q = searchTerm(params);
+    // Who sees what: everything at admin level, otherwise the accounts they manage or belong to
+    let ids: string[] | null = null;
+    if (!adminLevel) ids = (await accountService.getUserAccounts((userProfile as any).id, adminClient)).map((a: any) => a.id);
+    if (ids && ids.length === 0) return ok({ userProfile, isAdminLevel: adminLevel, accounts: [], pagination: pageInfo(page, 0), q });
+    let query = (adminClient as any).from('accounts').select('*', { count: 'exact' });
+    if (ids) query = query.in('id', ids);
+    if (q) query = query.or(`name.ilike.*${q}*,primary_contact_name.ilike.*${q}*,description.ilike.*${q}*`);
+    const { data, count, error } = await query.order('name').order('id').range(page.from, page.to);
+    if (error) throw error;
+    return ok({ userProfile, isAdminLevel: adminLevel, accounts: data || [], pagination: pageInfo(page, count || 0), q });
+  }
   const accounts = adminLevel
     ? await accountService.getAllAccounts(adminClient)
     : await accountService.getUserAccounts((userProfile as any).id, adminClient);
@@ -278,14 +297,14 @@ export async function workspaceMatches(slug: string): Promise<PageOutcome<{ matc
 }
 
 /** GET /api/pages/<path>: the loader for a path, or null when no page uses that path. */
-export function loaderFor(path: string[]): (() => Promise<PageOutcome<unknown>>) | null {
+export function loaderFor(path: string[], params?: URLSearchParams): (() => Promise<PageOutcome<unknown>>) | null {
   const [first, second, third] = path;
   const shape = path.length === 1 ? first : path.length === 2 ? `${first}/*` : path.length === 3 ? `${first}/*/${third}` : '';
   switch (shape) {
     case 'manager': return managerAccess;
     case 'client-portal': return clientPortal;
     case 'admin-workflows': return workflowsAccess;
-    case 'accounts': return accountsPage;
+    case 'accounts': return () => accountsPage(params);
     case 'accounts/*': return () => accountPage(second);
     case 'departments': return departmentsPage;
     case 'departments/*': return () => departmentPage(second);

@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useListParams } from '@/lib/hooks/use-list-params';
+import { PaginationBar } from '@/components/ui/pagination-bar';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { toast } from 'sonner';
@@ -15,15 +17,20 @@ import { Users, UserPlus, Shield } from 'lucide-react';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export default function AdminUsersPage() {
-  const [type, setType] = useState<'all' | 'internal' | 'client'>('all');
-  const [q, setQ] = useState('');
-  const [showInactive, setShowInactive] = useState(true);
-  const { data, error, isLoading, mutate } = useSWR(`/api/admin/users?type=${type}`, jsonFetcher);
+  // Type, search, "show deactivated" and the page live in the URL; the server filters and pages
+  const list = useListParams('admin-users', { type: 'all', q: '', inactive: '1' });
+  const type = (['internal', 'client'].includes(list.values.type) ? list.values.type : 'all') as 'all' | 'internal' | 'client';
+  const showInactive = list.values.inactive !== '0';
+  const [q, setQ] = useState(list.values.q);
+  useEffect(() => { setQ(list.values.q); }, [list.values.q]);
+  useEffect(() => {
+    if (q.trim() === list.values.q) return;
+    const timer = setTimeout(() => list.update({ q: q.trim() }), 350);
+    return () => clearTimeout(timer);
+  }, [q, list]);
+  const { data, error, isLoading, isValidating, mutate } = useSWR(`/api/admin/users?${list.apiQuery}`, jsonFetcher, { keepPreviousData: true });
   const allDepartments: { id: string; name: string }[] = data?.data?.departments || [];
-  const users: any[] = useMemo(() => (data?.data?.users || []).filter((u: any) =>
-    (showInactive || u.is_active !== false) &&
-    (!q.trim() || `${u.name} ${u.email} ${u.account_name || ''}`.toLowerCase().includes(q.toLowerCase()))
-  ), [data, q, showInactive]);
+  const users: any[] = data?.data?.users || [];
 
   // Suspend: temporary deactivation with a reason and an optional end date
   const [suspending, setSuspending] = useState<any | null>(null);
@@ -80,10 +87,10 @@ export default function AdminUsersPage() {
       </div>
       <div className="flex flex-wrap gap-2 items-center">
         {(['all', 'internal', 'client'] as const).map((t) => (
-          <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => setType(t)}>{t === 'all' ? 'Everyone' : t === 'internal' ? 'Employees' : 'Clients'}</Button>
+          <Button key={t} size="sm" variant={type === t ? 'default' : 'outline'} onClick={() => list.update({ type: t })}>{t === 'all' ? 'Everyone' : t === 'internal' ? 'Employees' : 'Clients'}</Button>
         ))}
         <Input className="w-64" placeholder="Search name, email, account…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <label className="text-sm flex items-center gap-1"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show deactivated</label>
+        <label className="text-sm flex items-center gap-1"><input type="checkbox" checked={showInactive} onChange={(e) => list.update({ inactive: e.target.checked ? '1' : '0' })} />Show deactivated</label>
       </div>
       <Card>
         <CardContent className="p-0 overflow-x-auto">
@@ -119,6 +126,14 @@ export default function AdminUsersPage() {
               </tbody>
             </table>
           )}
+          <PaginationBar
+            className="px-4 pb-4"
+            pagination={data?.meta?.pagination}
+            onPageChange={list.setPage}
+            onPageSizeChange={list.setPageSize}
+            loading={isValidating && !!data}
+            itemLabel="users"
+          />
         </CardContent>
       </Card>
 

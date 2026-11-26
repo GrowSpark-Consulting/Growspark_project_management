@@ -5,8 +5,11 @@ import { Permission } from '@/lib/permissions';
 import { hasAccountAccessServer } from '@/lib/access-control-server';
 import { logger } from '@/lib/debug-logger';
 import { isValidUUID } from '@/lib/validation-helpers';
+import { wantsPage, readPage, pageInfo } from '@/lib/pagination';
 
-// GET /api/accounts/[id]/client-feedback - View feedback for specific account
+// GET /api/accounts/[id]/client-feedback - View feedback for specific account, newest first.
+// With page/pageSize (20, 50, 100): one page plus `pagination` and `stats` (count, average and per-score counts
+// over ALL of the account's feedback, computed by the server). Without: every entry (as before).
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ accountId: string }> }
@@ -66,8 +69,12 @@ export async function GET(
       }, { status: 403 });
     }
 
+    const sp = new URL(request.url).searchParams;
+    const paged = wantsPage(sp);
+    const pageRequest = readPage(sp);
+
     // Get feedback for account with enriched data
-    const { data: feedback, error: feedbackError } = await supabase
+    const listQuery = supabase
       .from('client_feedback')
       .select(`
         *,
@@ -81,9 +88,37 @@ export async function GET(
           name,
           email
         )
-      `)
+      `, paged ? { count: 'exact' } : undefined)
       .eq('projects.account_id', accountId)
-      .order('submitted_at', { ascending: false });
+      .order('submitted_at', { ascending: false })
+      .order('id', { ascending: false });
+
+    if (paged) {
+      // The summary covers every entry, so it comes from a light query (one column), not from the page
+      const [{ data: feedback, count, error: feedbackError }, { data: scoreRows, error: scoreError }] = await Promise.all([
+        listQuery.range(pageRequest.from, pageRequest.to),
+        supabase.from('client_feedback').select('satisfaction_score, projects!inner(account_id)').eq('projects.account_id', accountId),
+      ]);
+      if (feedbackError || scoreError) {
+        logger.error('Error fetching feedback', {}, (feedbackError || scoreError) as unknown as Error);
+        return NextResponse.json({ error: 'Failed to fetch feedback' }, { status: 500 });
+      }
+      const scores = (scoreRows || []).map((r: any) => r.satisfaction_score).filter((v: unknown): v is number => typeof v === 'number');
+      const feedbackByScore: Record<number, number> = {};
+      for (const score of scores) feedbackByScore[score] = (feedbackByScore[score] || 0) + 1;
+      return NextResponse.json({
+        success: true,
+        feedback: feedback || [],
+        pagination: pageInfo(pageRequest, count || 0),
+        stats: {
+          totalFeedback: (scoreRows || []).length,
+          averageSatisfaction: scores.length ? Math.round((scores.reduce((a: number, b: number) => a + b, 0) / scores.length) * 10) / 10 : 0,
+          feedbackByScore,
+        },
+      }, { status: 200 });
+    }
+
+    const { data: feedback, error: feedbackError } = await listQuery;
 
     if (feedbackError) {
       logger.error('Error fetching feedback', {}, feedbackError as unknown as Error);

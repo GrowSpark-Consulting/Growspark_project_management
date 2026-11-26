@@ -9,6 +9,7 @@ import { invitationEmailTemplate } from '@/lib/email/templates/invitation';
 import { logger } from '@/lib/debug-logger';
 
 import { buildWhatsAppUrl } from '@/lib/portal';
+import { wantsPage, readPage, pageInfo, searchTerm } from '@/lib/pagination';
 
 // POST - Create a new invitation and send email
 export async function POST(request: NextRequest) {
@@ -228,6 +229,11 @@ export async function GET(request: NextRequest) {
 
     // Managers without manage_user_roles see the invitations they sent (read on the server)
     const listClient = authority === 'own' ? (createAdminSupabaseClient() || supabase) : supabase;
+    // With page/pageSize (20, 50, 100): one page (newest first) plus `pagination`; optional status and q
+    // (name or email). Without them: every invitation (as before).
+    const sp = new URL(request.url).searchParams;
+    const paged = wantsPage(sp);
+    const pageRequest = readPage(sp);
     let listQuery = listClient
       .from('user_invitations')
       .select(`
@@ -235,17 +241,24 @@ export async function GET(request: NextRequest) {
         roles:role_id(id, name),
         departments:department_id(id, name),
         inviter:invited_by(id, name, email)
-      `)
-      .order('created_at', { ascending: false });
+      `, paged ? { count: 'exact' } : undefined)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
     if (authority === 'own') listQuery = listQuery.eq('invited_by', user.id);
-    const { data: invitations, error } = await listQuery;
+    const status = sp.get('status');
+    if (status && ['pending', 'accepted', 'expired', 'revoked'].includes(status)) listQuery = listQuery.eq('status', status);
+    const q = searchTerm(sp);
+    if (q) listQuery = listQuery.or(`name.ilike.*${q}*,email.ilike.*${q}*`);
+    const { data: invitations, count, error } = paged ? await listQuery.range(pageRequest.from, pageRequest.to) : await listQuery;
 
     if (error) {
       logger.error('Failed to fetch invitations', { error: error.message });
       return NextResponse.json({ error: 'Failed to fetch invitations' }, { status: 500 });
     }
 
-    return NextResponse.json({ invitations: invitations || [] });
+    return NextResponse.json(paged
+      ? { invitations: invitations || [], pagination: pageInfo(pageRequest, count || 0) }
+      : { invitations: invitations || [] });
 
   } catch (error: unknown) {
     return handleGuardError(error);

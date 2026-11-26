@@ -5,6 +5,10 @@ import { toast } from 'sonner';
 import { Loader2, RefreshCw, XCircle, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { useListParams } from '@/lib/hooks/use-list-params';
+import type { PageInfo } from '@/lib/pagination';
 import {
   Table,
   TableBody,
@@ -34,17 +38,29 @@ const statusBadgeVariants: Record<string, { className: string; label: string }> 
 };
 
 export function InvitationList() {
+  // Page, size, status and search live in the URL; the server filters and pages
+  const list = useListParams('invitations', { status: '', q: '' });
+  const [searchInput, setSearchInput] = useState(list.values.q);
+  useEffect(() => { setSearchInput(list.values.q); }, [list.values.q]);
+  useEffect(() => {
+    if (searchInput === list.values.q) return;
+    const timer = setTimeout(() => list.update({ q: searchInput.trim() }), 350);
+    return () => clearTimeout(timer);
+  }, [searchInput, list]);
+  const [pagination, setPagination] = useState<PageInfo | null>(null);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [resending, setResending] = useState<string | null>(null);
 
   const fetchInvitations = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetch('/api/invitations', { credentials: 'include' });
+      const res = await fetch(`/api/invitations?${list.apiQuery}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setInvitations(data.invitations || []);
+        setPagination(data.pagination || null);
       } else {
         toast.error('Failed to load invitations');
       }
@@ -53,7 +69,7 @@ export function InvitationList() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [list.apiQuery]);
 
   useEffect(() => {
     fetchInvitations();
@@ -76,6 +92,7 @@ export function InvitationList() {
         } else {
           toast.success('Invitation deleted');
           setInvitations((prev) => prev.filter((inv) => inv.id !== id));
+          fetchInvitations();
         }
       } else {
         const data = await res.json();
@@ -117,7 +134,7 @@ export function InvitationList() {
     });
   }
 
-  if (loading) {
+  if (loading && invitations.length === 0 && !pagination) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
@@ -134,7 +151,6 @@ export function InvitationList() {
           variant="outline"
           size="sm"
           onClick={() => {
-            setLoading(true);
             fetchInvitations();
           }}
         >
@@ -143,9 +159,26 @@ export function InvitationList() {
         </Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search name or email"
+          aria-label="Search invitations"
+          className="w-64"
+        />
+        {(['', 'pending', 'accepted', 'expired', 'revoked'] as const).map((st) => (
+          <Button key={st || 'all'} size="sm" variant={list.values.status === st ? 'default' : 'outline'} onClick={() => list.update({ status: st })}>
+            {st ? statusBadgeVariants[st].label : 'All'}
+          </Button>
+        ))}
+      </div>
+
       {invitations.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-sm text-gray-500">No invitations yet. Invite your first team member above.</p>
+          <p className="text-sm text-gray-500">
+            {list.values.status || list.values.q ? 'No invitations match these filters.' : 'No invitations yet. Invite your first team member above.'}
+          </p>
         </div>
       ) : (
         <div className="rounded-lg border overflow-hidden">
@@ -241,6 +274,13 @@ export function InvitationList() {
           </Table>
         </div>
       )}
+      <PaginationBar
+        pagination={pagination}
+        onPageChange={list.setPage}
+        onPageSizeChange={list.setPageSize}
+        loading={loading}
+        itemLabel="invitations"
+      />
     </div>
   );
 }

@@ -4,17 +4,23 @@ import { useRouter } from 'next/navigation';
 import { AccountList } from '@/components/account-list';
 import { Account } from '@/lib/account-service';
 import { UserWithRoles } from '@/lib/rbac';
+import type { PageInfo } from '@/lib/pagination';
 
 interface AccountsClientWrapperProps {
   initialAccounts: Account[];
   userProfile: UserWithRoles;
   isAdminLevel: boolean;
+  /** The server-side page of the list (page, size, total) and the search it was made with */
+  pagination?: PageInfo;
+  search?: string;
 }
 
-export function AccountsClientWrapper({ 
-  initialAccounts, 
-  userProfile, 
-  isAdminLevel 
+export function AccountsClientWrapper({
+  initialAccounts,
+  userProfile,
+  isAdminLevel,
+  pagination,
+  search = '',
 }: AccountsClientWrapperProps) {
   const router = useRouter();
   // The list comes from the server page, so a refresh brings the new account in
@@ -33,7 +39,7 @@ export function AccountsClientWrapper({
           <div className="space-y-3">
             <h1 className="text-4xl font-bold text-foreground">Accounts</h1>
             <p className="text-lg text-muted-foreground leading-relaxed">
-              {isAdminLevel 
+              {isAdminLevel
                 ? "Manage client accounts and their associated projects"
                 : "View accounts you have access to and their associated projects"
               }
@@ -42,10 +48,12 @@ export function AccountsClientWrapper({
         </div>
       </div>
 
-      <AccountList 
-        accounts={accounts} 
-        userProfile={userProfile} 
+      <AccountList
+        accounts={accounts}
+        userProfile={userProfile}
         onAccountCreated={handleAccountCreated}
+        pagination={pagination}
+        search={search}
       />
     </div>
   );

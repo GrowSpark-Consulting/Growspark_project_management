@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { PaginationBar } from '@/components/ui/pagination-bar';
+import { useListParams } from '@/lib/hooks/use-list-params';
+import type { PageInfo } from '@/lib/pagination';
 import { RoleGuard } from '@/components/role-guard';
 import { Permission } from '@/lib/permissions';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -58,6 +61,9 @@ export default function ClientFeedbackPage() {
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [feedback, setFeedback] = useState<ClientFeedback[]>([]);
   const [stats, setStats] = useState<FeedbackStats | null>(null);
+  // Page and size live in the URL (?page=2&pageSize=50); the server pages the feedback and sums it up
+  const list = useListParams('client-feedback', {});
+  const [pagination, setPagination] = useState<PageInfo | null>(null);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
   const [selectedFeedback, setSelectedFeedback] = useState<ClientFeedback | null>(null);
@@ -68,13 +74,13 @@ export default function ClientFeedbackPage() {
     void loadAccounts();
   }, []);
 
-  // Load feedback when account is selected
+  // Load feedback when the account, page or page size changes
   useEffect(() => {
     if (selectedAccount) {
       void loadFeedback(selectedAccount.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccount]);
+  }, [selectedAccount, list.page, list.pageSize]);
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
@@ -100,11 +106,13 @@ export default function ClientFeedbackPage() {
   const loadFeedback = async (accountId: string) => {
     setLoadingFeedback(true);
     try {
-      const response = await fetch(`/api/accounts/${accountId}/client-feedback`);
+      const response = await fetch(`/api/accounts/${accountId}/client-feedback?page=${list.page}&pageSize=${list.pageSize}`);
       if (response.ok) {
         const data = await response.json();
         setFeedback(data.feedback || []);
-        calculateStats(data.feedback || []);
+        setPagination(data.pagination || null);
+        if (data.stats) setStats(data.stats);
+        else calculateStats(data.feedback || []);
       } else {
         toast.error('Failed to load feedback');
       }
@@ -227,7 +235,7 @@ export default function ClientFeedbackPage() {
                 {accounts.map((account:any) => (
                   <button
                     key={account.id}
-                    onClick={() => { setSelectedAccount(account); }}
+                    onClick={() => { setSelectedAccount(account); list.setPage(1); }}
                     className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
                       selectedAccount?.id === account.id
                         ? 'bg-blue-100 text-blue-900 font-medium'
@@ -350,6 +358,14 @@ export default function ClientFeedbackPage() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationBar
+                  className="px-4 pb-4"
+                  pagination={pagination}
+                  onPageChange={list.setPage}
+                  onPageSizeChange={list.setPageSize}
+                  loading={loadingFeedback}
+                  itemLabel="feedback entries"
+                />
               </div>
             )}
           </CardContent>
