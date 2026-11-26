@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { User } from '@supabase/supabase-js'
 import { createClientSupabase } from '../supabase'
-import { getCurrentUserProfile, signOut } from '../auth'
+import { getCurrentUserProfile, signOut, ServerUnavailableError } from '../auth'
 import { UserWithRoles } from '../rbac'
 import { clearPermissionCache } from '../permission-checker'
 import { logger } from '../debug-logger'
@@ -75,6 +75,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             })
             .catch(async (error) => {
+              if (isMounted && error instanceof ServerUnavailableError) {
+                // The server is down or still waking: keep the person signed in, they can reload in a moment
+                logger.error('Server unavailable while loading the user profile', {}, error as Error)
+                setError('The server is not responding. Please reload the page in a moment.')
+                setLoading(false)
+                return
+              }
               if (isMounted) {
                 logger.error('Error loading initial user profile', {}, error as Error)
                 // Profile fetch failed — session is likely stale (user doesn't exist in DB)

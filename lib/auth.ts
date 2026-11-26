@@ -7,6 +7,30 @@ import { type DirectMembership } from './department-membership';
 // Authentication helper functions
 
 /**
+ * The API runs on a server that sleeps when idle and needs up to a minute to wake. While it wakes, the
+ * frontend answers 502/503/504 (or the request fails outright). That is not an answer about the user, so
+ * we wait and ask again instead of treating it as "no profile" (which would sign the person out).
+ */
+export class ServerUnavailableError extends Error {}
+const WAKING_STATUSES = new Set([502, 503, 504]);
+
+async function fetchWhileServerWakes(url: string, init: RequestInit, maxWaitMs = 120000): Promise<Response> {
+  const started = Date.now();
+  let delay = 2000;
+  for (;;) {
+    try {
+      const response = await fetch(url, init);
+      if (!WAKING_STATUSES.has(response.status)) return response;
+    } catch {
+      // Network error: the server is not reachable yet
+    }
+    if (Date.now() - started + delay > maxWaitMs) throw new ServerUnavailableError('The server is not responding');
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(Math.round(delay * 1.5), 10000);
+  }
+}
+
+/**
  * Get the current authenticated user (client-side only)
  * Automatically refreshes session if expired
  * @returns The current user or null if not authenticated
@@ -60,7 +84,8 @@ export async function getCurrentUserProfile() {
     }
 
     // Profile with roles and direct department memberships, loaded on the server as the user
-    const response = await fetch('/api/me/profile', { credentials: 'include', cache: 'no-store' });
+    // Waits while the server wakes; a real answer (e.g. 401 not signed in, 404 no profile) comes back as is
+    const response = await fetchWhileServerWakes('/api/me/profile', { credentials: 'include', cache: 'no-store' });
     if (!response.ok) {
       return null;
     }
@@ -79,6 +104,8 @@ export async function getCurrentUserProfile() {
       department_members: DirectMembership[];
     };
   } catch (error: unknown) {
+    // The server did not wake in time: say so, so the caller keeps the session instead of signing out
+    if (error instanceof ServerUnavailableError) throw error;
     logger.error('Error in getCurrentUserProfile', {}, error as Error);
     return null;
   }

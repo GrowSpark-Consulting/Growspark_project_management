@@ -35,9 +35,15 @@ export function SWRProvider({ children }: { children: ReactNode }) {
         revalidateOnReconnect: true,
         // Don't revalidate stale data automatically
         revalidateIfStale: false,
-        // Error retry configuration
-        errorRetryCount: 2,
-        errorRetryInterval: 5000,
+        // Error retry: a real answer from the API (4xx) is not retried. Anything else (502/503/504 while the
+        // server wakes from sleep, network errors, an HTML error page instead of JSON) is retried for about
+        // a minute, so a page opened while the server wakes fills in by itself.
+        onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
+          const status = (error as { status?: number })?.status
+          if (status && status >= 400 && status < 500) return
+          if (retryCount > 8) return
+          setTimeout(() => revalidate({ retryCount }), Math.min(3000 * retryCount, 10000))
+        },
         // Performance: Use cache immediately while revalidating in background
         suspense: false,
         // KEEP THIS TRUE: Required for initial data loading on component mount
