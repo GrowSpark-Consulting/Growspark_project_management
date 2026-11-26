@@ -671,6 +671,16 @@ async function main() {
       report.record('ADM-invite-signin', !(s instanceof Error) && !!s.userId, s instanceof Error ? s.message : 'new user can sign in');
     }
   });
+  await step('ADM-client-invite-as-page', async () => {
+    // The Client Portal page sends only email, validity, email switch and phone: the account is in the address
+    const email = `page.client.${RUN}@example.com`;
+    const r = await api('pm', 'POST', `/api/accounts/${IDS.acme}/invite-client`, { email, expires_in_days: 30, send_email: false, phone: '8102691522' });
+    report.record('ADM-client-invite-as-page', r.status === 201 && !!r.body?.acceptUrl && String(r.body?.whatsappUrl).startsWith('https://wa.me/918102691522?text='), `status ${r.status} ${r.body?.error || ''}; whatsapp ${String(r.body?.whatsappUrl).slice(0, 40)}`);
+    const long = await api('pm', 'POST', `/api/accounts/${IDS.acme}/invite-client`, { email: `page.client2.${RUN}@example.com`, expires_in_days: 365, send_email: false });
+    report.record('ADM-client-invite-365', long.status === 201, `a 365-day invitation: status ${long.status} ${long.body?.error || ''}`);
+    const bad = await api('pm', 'POST', `/api/accounts/${IDS.acme}/invite-client`, { email: `page.client3.${RUN}@example.com`, expires_in_days: 366, send_email: false });
+    report.status('ADM-client-invite-366', bad, 400);
+  });
   await step('ADM-client-invite', async () => {
     const r = await api('pm', 'POST', `/api/accounts/${IDS.acme}/invite-client`, { account_id: IDS.acme, email: `client.${RUN}@example.com`, expires_in_days: 7 });
     report.record('ADM-client-invite', r.status === 201 && /^https:\/\/wa\.me\//.test(r.body?.whatsappUrl || ''), `status ${r.status}; whatsapp link=${!!r.body?.whatsappUrl}`);

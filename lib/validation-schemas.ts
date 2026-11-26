@@ -392,7 +392,8 @@ export const submitFormResponseSchema = z.object({
 export const sendClientInvitationSchema = z.object({
   account_id: uuidSchema,
   email: emailSchema,
-  expires_in_days: z.number().int().min(1).max(30).optional(),
+  // The Client Portal page offers 1-365 days
+  expires_in_days: z.number().int().min(1).max(365).optional(),
 });
 
 export const acceptClientInvitationSchema = z.object({

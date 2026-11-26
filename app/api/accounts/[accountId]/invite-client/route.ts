@@ -73,7 +73,8 @@ export async function POST(
 
     // Validate request body
     const body = await request.json();
-    const validation = validateRequestBody(sendClientInvitationSchema, body);
+    // The account is the one in the address; a body that also names it is checked against that
+    const validation = validateRequestBody(sendClientInvitationSchema, { ...(body as object), account_id: accountId });
     if (!validation.success) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
@@ -99,7 +100,7 @@ export async function POST(
     const sendEmailToo = (body as { send_email?: boolean }).send_email !== false;
     const phone = typeof (body as { phone?: unknown }).phone === 'string' ? (body as { phone: string }).phone : null;
     const whatsappUrl = buildWhatsAppUrl(
-      `Hello! You're invited to follow your projects with ${account?.name || 'us'} on Project Management. Create your client account here (valid 7 days): ${inviteUrl}`,
+      `Hello! You're invited to follow your projects with ${account?.name || 'us'} on Project Management. Create your client account here (valid ${validation.data.expires_in_days ?? 7} days): ${inviteUrl}`,
       phone
     );
     if (!sendEmailToo) {
@@ -112,12 +113,12 @@ export async function POST(
       html: clientInvitationEmailHtml({
         accountName: account?.name || 'Your Account',
         inviteUrl,
-        expiresInDays: 7,
+        expiresInDays: validation.data.expires_in_days ?? 7,
       }),
       text: clientInvitationEmailText({
         accountName: account?.name || 'Your Account',
         inviteUrl,
-        expiresInDays: 7,
+        expiresInDays: validation.data.expires_in_days ?? 7,
       }),
     });
 

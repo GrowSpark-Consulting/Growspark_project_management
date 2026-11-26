@@ -69,9 +69,20 @@ export function landingPathFor(profile: AnyProfile): string {
   return '/dashboard';
 }
 
+/**
+ * Digits for wa.me (country code first, no +). A 10-digit Indian mobile number typed without the country code
+ * (98765 43210, or 098765 43210 with the trunk 0) gets 91; anything longer is taken to include its country code.
+ */
+export function whatsappDigits(phone?: string | null): string {
+  let digits = (phone || '').replace(/[^\d]/g, '');
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length === 10 && /^[6-9]/.test(digits)) digits = `91${digits}`;
+  return digits;
+}
+
 /** Build a free WhatsApp click-to-chat URL (no WhatsApp Business API needed). */
 export function buildWhatsAppUrl(message: string, phone?: string | null): string {
-  const digits = (phone || '').replace(/[^\d]/g, '');
+  const digits = whatsappDigits(phone);
   const base = digits ? `https://wa.me/${digits}` : 'https://wa.me/';
   return `${base}?text=${encodeURIComponent(message)}`;
 }

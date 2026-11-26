@@ -627,7 +627,7 @@ export default function ClientPortalPage() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="invite-phone">WhatsApp number (optional, with country code)</Label>
+              <Label htmlFor="invite-phone">WhatsApp number (optional)</Label>
               <Input id="invite-phone" placeholder="+91 98765 43210" value={invitePhone} onChange={(e) => { setInvitePhone(e.target.value); }} />
             </div>
             <label className="flex items-center gap-2 text-sm">

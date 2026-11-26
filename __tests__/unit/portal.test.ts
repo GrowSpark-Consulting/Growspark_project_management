@@ -69,4 +69,14 @@ describe('buildWhatsAppUrl', () => {
   it('without a phone number, opens WhatsApp to pick a contact', () => {
     expect(buildWhatsAppUrl('Hi')).toBe('https://wa.me/?text=Hi')
   })
+  it('an Indian mobile number typed without the country code gets 91', () => {
+    expect(buildWhatsAppUrl('Hi', '8102691522')).toBe('https://wa.me/918102691522?text=Hi')
+    expect(buildWhatsAppUrl('Hi', '81026 91522')).toBe('https://wa.me/918102691522?text=Hi')
+    expect(buildWhatsAppUrl('Hi', '08102691522')).toBe('https://wa.me/918102691522?text=Hi')
+  })
+  it('numbers that already carry a country code are left as they are', () => {
+    expect(buildWhatsAppUrl('Hi', '+91 81026 91522')).toBe('https://wa.me/918102691522?text=Hi')
+    expect(buildWhatsAppUrl('Hi', '+1 415 555 2671')).toBe('https://wa.me/14155552671?text=Hi')
+    expect(buildWhatsAppUrl('Hi', '+44 7911 123456')).toBe('https://wa.me/447911123456?text=Hi')
+  })
 })
