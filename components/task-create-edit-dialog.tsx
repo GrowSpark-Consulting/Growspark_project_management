@@ -371,7 +371,9 @@ export default function TaskCreateEditDialog({
                 </SelectContent>
               </Select>
             <p className="text-xs text-muted-foreground">
-              Only members of the project team can be assigned. Add people in the Team section first.
+              {users.length > 0 && users.every((user: any) => user?.id === (userProfile as any)?.id)
+                ? 'You can assign a task to yourself. Project managers assign tasks to the rest of the team.'
+                : 'Only members of the project team can be assigned. Add people in the Team section first.'}
             </p>
           </div>
 

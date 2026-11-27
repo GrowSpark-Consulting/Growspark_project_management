@@ -43,6 +43,10 @@ async function updateTask(request: NextRequest, ctx: ApiCtx, params: { taskId: s
     if (!canEditDetails && !selfAssign) {
       throw new HttpError(403, 'Only the task creator or a project manager can reassign this task')
     }
+    // Employees assign tasks to themselves only (also when they created the task); a project manager can assign anyone
+    if (body.assigned_to && body.assigned_to !== ctx.userId && !access.canManage) {
+      throw new HttpError(403, 'You can only assign tasks to yourself')
+    }
     if (body.assigned_to) await assertValidAssignee(ctx, task.project_id, body.assigned_to)
   }
   if (body.reviewer_id !== undefined && body.reviewer_id !== task.reviewer_id) {

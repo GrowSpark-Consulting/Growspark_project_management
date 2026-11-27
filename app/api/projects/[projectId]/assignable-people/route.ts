@@ -1,8 +1,10 @@
-import { api, ok, assertUuid } from '@/lib/api/context';
+import { api, ok, assertUuid, getProjectAccess } from '@/lib/api/context';
 
 // GET /api/projects/[projectId]/assignable-people: the project team with their role names, for the task
 // dialog's assignee list (moved off browser queries). Runs as the signed-in user, so row-level security
-// applies. An assignee must be on the project team (the task API refuses anyone else).
+// applies. An assignee must be on the project team (the task API refuses anyone else). A project manager
+// gets the whole team; anyone else gets only themselves (employees assign tasks to themselves only, and the
+// task API enforces the same rule).
 export const GET = api<{ projectId: string }>(async (_request, ctx, params) => {
   const projectId = assertUuid(params.projectId, 'project id');
   const db = ctx.supabase;
@@ -29,5 +31,7 @@ export const GET = api<{ projectId: string }>(async (_request, ctx, params) => {
     }
   }
   for (const person of people.values()) if (!person.roles.length) person.roles = ['Team Member'];
+  const access = await getProjectAccess(ctx, projectId);
+  if (!access?.canManage) return ok([...people.values()].filter((person) => person.id === ctx.userId));
   return ok([...people.values()]);
 });

@@ -31,7 +31,11 @@ export const POST = api(async (request: NextRequest, ctx) => {
     if (!parent || parent.project_id !== body.project_id) throw new HttpError(400, 'Parent task must be in the same project')
     if (parent.parent_task_id) throw new HttpError(400, 'Subtasks cannot have their own subtasks')
   }
-  if (body.assigned_to) await assertValidAssignee(ctx, body.project_id, body.assigned_to)
+  if (body.assigned_to) {
+    // Employees assign tasks to themselves only; a project manager can assign anyone on the team
+    if (body.assigned_to !== ctx.userId && !access.canManage) throw new HttpError(403, 'You can only assign tasks to yourself')
+    await assertValidAssignee(ctx, body.project_id, body.assigned_to)
+  }
   if (body.reviewer_id) {
     // The reviewer is chosen by a project manager only (also enforced by the database, G-1)
     if (!access.canManage) throw new HttpError(403, 'Only a project manager can choose the reviewer')

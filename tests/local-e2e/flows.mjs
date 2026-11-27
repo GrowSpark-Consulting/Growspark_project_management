@@ -135,6 +135,14 @@ async function main() {
   });
   report.status('TSK-emp-reviewer', await api('emp1', 'POST', '/api/tasks', { name: 'Self review', project_id: IDS.website, assigned_to: ids.emp1, reviewer_id: ids.emp2 }), 403, 'only a manager chooses the reviewer');
   report.status('TSK-bad-dates', await api('pm', 'POST', '/api/tasks', { name: 'Bad dates', project_id: IDS.website, start_date: isoDate(addDays(5)), due_date: isoDate(today) }), 400);
+  // Employees assign tasks to themselves only; a project manager assigns anyone on the team
+  report.status('TSK-emp-assign-other-deny', await api('emp1', 'POST', '/api/tasks', { name: `Hand to colleague ${RUN}`, project_id: IDS.website, assigned_to: ids.emp2 }), 403, 'an employee cannot assign a new task to someone else');
+  report.status('TSK-emp-assign-self', await api('emp1', 'POST', '/api/tasks', { name: `Mine ${RUN}`, project_id: IDS.website, assigned_to: ids.emp1 }), 201, 'an employee can assign a new task to themselves');
+  await step('TSK-emp-people-list', async () => {
+    const emp = payload(await api('emp1', 'GET', `/api/projects/${IDS.website}/assignable-people`));
+    const mgr = payload(await api('pm', 'GET', `/api/projects/${IDS.website}/assignable-people`));
+    report.record('TSK-emp-people-list', Array.isArray(emp) && emp.length <= 1 && emp.every((p) => p.id === ids.emp1) && Array.isArray(mgr) && mgr.length > 1, `employee sees ${emp?.length} person (themselves), manager sees ${mgr?.length}`);
+  });
   report.status('TSK-assign-outsider', await api('pm', 'POST', '/api/tasks', { name: 'Outsider', project_id: IDS.website, assigned_to: ids.outsider }), [400, 403], 'assignee must be on the team');
   await step('TSK-emp-create', async () => {
     const r = await api('emp1', 'POST', '/api/tasks', { name: `Write tests ${RUN}`, project_id: IDS.website, priority: 'medium', estimated_hours: 2 });
