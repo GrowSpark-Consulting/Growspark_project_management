@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { assignedTaskIds, onTaskFilter } from '@/lib/task-assignees';
 import { createApiSupabaseClient, getUserProfileFromRequest } from '@/lib/supabase-server';
 import { logger } from '@/lib/debug-logger';
 import {
@@ -63,6 +64,10 @@ export async function GET(request: NextRequest) {
     }
 
     const userId = userProfile.id;
+
+    // Tasks I am on, including shared tasks where I am not the first assignee
+
+    const myTaskIds = await assignedTaskIds(supabase, userId);
     const now = new Date();
     const today = format(now, 'yyyy-MM-dd');
 
@@ -128,7 +133,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from('tasks')
         .select('id, name, status, due_date, project_id, updated_at, projects(name)')
-        .eq('assigned_to', userId)
+        .or(onTaskFilter(userId, myTaskIds))
         .neq('status', 'done'),
 
       // User availability for current week
@@ -151,7 +156,7 @@ export async function GET(request: NextRequest) {
     const completedThisWeekResult = await supabase
       .from('tasks')
       .select('id')
-      .eq('assigned_to', userId)
+      .or(onTaskFilter(userId, myTaskIds))
       .eq('status', 'done')
       .gte('updated_at', weekStartStr);
 
@@ -262,7 +267,7 @@ export async function GET(request: NextRequest) {
     const allTasksResult = await supabase
       .from('tasks')
       .select('status')
-      .eq('assigned_to', userId);
+      .or(onTaskFilter(userId, myTaskIds));
 
     const allTasks = allTasksResult.data || [];
     const statusBreakdown = {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useAuth } from '@/lib/hooks/useAuth'
+import { AssigneeAvatars } from '@/components/task/assignee-avatars';
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, notFound } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -2863,11 +2864,7 @@ export default function ProjectDetailPage() {
                                   </span>
                                 )}
                               </div>
-                              {task.assigned_to_user && (
-                                <span className="text-xs text-gray-500 truncate max-w-[80px]" title={task.assigned_to_user.name}>
-                                  {task.assigned_to_user.name?.split(' ')[0]}
-                                </span>
-                              )}
+                              <AssigneeAvatars assignees={(task as any).assignees} fallbackName={task.assigned_to_user?.name} />
                             </div>
                             {/* Quick Actions */}
                             <div className="flex items-center gap-1 mt-2 pt-2 border-t opacity-0 group-hover:opacity-100 transition-opacity">

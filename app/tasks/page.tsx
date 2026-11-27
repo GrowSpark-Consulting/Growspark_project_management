@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { AssigneeAvatars } from '@/components/task/assignee-avatars'
 import { useListParams } from '@/lib/hooks/use-list-params';
 import { PaginationBar } from '@/components/ui/pagination-bar';
 import Link from 'next/link';
@@ -119,7 +120,11 @@ export default function MyTasksPage() {
             <ul className="divide-y">
               {tasks.map((t) => {
                 const overdue = t.due_date && t.due_date.slice(0, 10) < today && t.status !== 'done';
-                const actions = availableActions(t.status, { canContribute: true, canReview: false }).filter((a) => ['start', 'resume', 'pause', 'submit'].includes(a));
+                // A task shared by several people: the buttons act on my own part (done = my part complete)
+                const shared = (t.assignees?.length || 0) > 1 && !!t.my_part
+                const PART_AS_STATUS: Record<string, string> = { todo: 'todo', in_progress: 'in_progress', blocked: 'on_hold', done: 'review' }
+                const actionStatus = shared && t.status !== 'done' ? PART_AS_STATUS[t.my_part.status] || 'todo' : t.status
+                const actions = availableActions(actionStatus, { canContribute: true, canReview: false }).filter((a) => ['start', 'resume', 'pause', 'submit'].includes(a));
                 return (
                   <li key={t.id} className="flex flex-col md:flex-row md:items-center gap-2 p-3 hover:bg-gray-50">
                     <button className="flex-1 text-left min-w-0" onClick={() => setOpenId(t.id)}>
@@ -133,7 +138,10 @@ export default function MyTasksPage() {
                         <Link href={`/projects/${t.project_id}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>{t.project?.name}</Link>
                         {t.due_date && <span className={overdue ? 'text-red-600 font-medium flex items-center gap-1' : ''}>{overdue && <AlertTriangle className="h-3 w-3" />}Due {formatDay(t.due_date)}</span>}
                         {t.subtasks?.total > 0 && <span>{t.subtasks.done}/{t.subtasks.total} subtasks</span>}
-                        {t.progress_percent > 0 && t.status !== 'done' && <span>{t.progress_percent}%</span>}
+                        {shared ? (
+                          <span data-testid="shared-task-progress">Shared · my part {t.my_part.progress_percent}% · {t.assignee_summary?.done}/{t.assignee_summary?.total} done · {t.progress_percent}% overall</span>
+                        ) : t.progress_percent > 0 && t.status !== 'done' && <span>{t.progress_percent}%</span>}
+                        {(t.assignees?.length || 0) > 1 && <AssigneeAvatars assignees={t.assignees} />}
                         {t.status === 'changes_requested' && t.review_note && <span className="text-red-600 truncate max-w-xs">“{t.review_note}”</span>}
                       </div>
                     </button>
@@ -141,7 +149,7 @@ export default function MyTasksPage() {
                       <div className="flex gap-1">
                         {actions.map((a) => {
                           const Icon = a === 'pause' ? Pause : a === 'submit' ? Send : Play;
-                          return <Button key={a} size="sm" variant="outline" onClick={() => quick(t, a)}><Icon className="h-3.5 w-3.5 mr-1" />{TASK_ACTIONS[a].label}</Button>;
+                          return <Button key={a} size="sm" variant="outline" onClick={() => quick(t, a)}><Icon className="h-3.5 w-3.5 mr-1" />{shared && a === 'submit' ? 'Complete my part' : TASK_ACTIONS[a].label}</Button>;
                         })}
                       </div>
                     )}

@@ -25,6 +25,8 @@ export interface Task {
   updated_at: string;
   parent_task_id?: string | null;
   progress_percent?: number;
+  /** Everyone on the task, earliest first (a task can be shared by several people) */
+  assignees?: Array<{ user_id: string; status: string; progress_percent: number; report: string | null; blocker: string | null; user: { id: string; name: string; email: string; image: string | null } | null }>;
   // Joined data
   created_by_user?: {
     id: string;

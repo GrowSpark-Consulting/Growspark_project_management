@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Task } from '@/lib/task-service-db';
 import { useAuth } from '@/lib/hooks/useAuth';
@@ -49,10 +50,15 @@ export default function TaskCreateEditDialog({
     start_date: '',
     due_date: '',
     estimated_hours: '',
-    assigned_to: 'unassigned', // Use 'unassigned' instead of empty string to avoid Select component error
   });
+  // Everyone on the task (a task can be shared by several people), and who was on it when the dialog opened
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
+  const [initialAssignees, setInitialAssignees] = useState<string[]>([]);
+  const [knownNames, setKnownNames] = useState<Record<string, string>>({});
 
   const isEditMode = !!task;
+  const nameOf = (id: string) => users.find((u) => u.id === id)?.name || knownNames[id] || (id === (userProfile as any)?.id ? (userProfile as any)?.name : null) || 'Team member';
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
   // Task permissions are now inherited from project access - if user can view the project page, they can manage tasks
   // Load only users who are members of the account or assigned to the project
@@ -104,8 +110,14 @@ export default function TaskCreateEditDialog({
         start_date: task.start_date ? String(task.start_date).split('T')[0] : '',
         due_date: task.due_date ? String(task.due_date).split('T')[0] : '',
         estimated_hours: task.estimated_hours?.toString() || '',
-        assigned_to: task.assigned_to || 'unassigned',
       });
+      const current = task.assignees?.length ? task.assignees.map((a) => a.user_id) : (task.assigned_to ? [task.assigned_to] : []);
+      setAssigneeIds(current);
+      setInitialAssignees(current);
+      const names: Record<string, string> = {};
+      task.assignees?.forEach((a) => { if (a.user?.name) names[a.user_id] = a.user.name; });
+      if (task.assigned_to && task.assigned_to_user?.name) names[task.assigned_to] = task.assigned_to_user.name;
+      setKnownNames(names);
     } else {
       // Reset form for create mode
       setFormData({
@@ -116,8 +128,10 @@ export default function TaskCreateEditDialog({
         start_date: '',
         due_date: '',
         estimated_hours: '',
-        assigned_to: 'unassigned',
       });
+      setAssigneeIds([]);
+      setInitialAssignees([]);
+      setKnownNames({});
     }
   }, [task, open]);
 
@@ -178,7 +192,8 @@ export default function TaskCreateEditDialog({
           start_date: formData.start_date || null,
           due_date: formData.due_date || null,
           estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
-          assigned_to: formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
+          // Only when the people changed (adding or removing others is a manager's call)
+          ...(sameSet(assigneeIds, initialAssignees) ? {} : { assignee_ids: assigneeIds }),
         };
 
         const response = await fetch(`/api/tasks/${task.id}`, {
@@ -207,7 +222,7 @@ export default function TaskCreateEditDialog({
           start_date: formData.start_date || null,
           due_date: formData.due_date || null,
           estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
-          assigned_to: formData.assigned_to && formData.assigned_to !== 'unassigned' ? formData.assigned_to : null,
+          assignee_ids: assigneeIds,
         };
 
         const response = await fetch('/api/tasks', {
@@ -348,32 +363,50 @@ export default function TaskCreateEditDialog({
             />
           </div>
 
-          {/* Assigned To - Task assignment permissions are inherited from project access */}
+          {/* Assigned To: one task can be shared by several people. Each person reports their own part. */}
           <div className="space-y-2">
-            <Label htmlFor="assigned_to">Assign To</Label>
-              <Select
-                value={formData.assigned_to}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, assigned_to: value }))}
-                disabled={loadingUsers}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={loadingUsers ? "Loading users..." : "Select a user (optional)"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {users && users.length > 0 && users
-                    .filter((user:any) => user && (user as any).id && typeof (user as any).id === 'string' && (user as any).id.trim() !== '')
-                    .map((user:any) => (
-                      <SelectItem key={(user as any).id} value={(user as any).id}>
-                        {user.roles.join(', ')} - {(user as any).name || 'Unknown'}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+            <Label htmlFor="assignees">Assign To</Label>
+            {assigneeIds.length > 0 ? (
+              <div className="flex flex-wrap gap-2" data-testid="assignee-chips">
+                {assigneeIds.map((id) => (
+                  <span key={id} className="inline-flex items-center gap-1 rounded-full border border-line bg-sunken px-2.5 py-1 text-sm">
+                    {nameOf(id)}
+                    <button
+                      type="button"
+                      onClick={() => setAssigneeIds((prev) => prev.filter((x) => x !== id))}
+                      className="rounded-full p-0.5 text-ink-muted hover:bg-hover hover:text-ink"
+                      aria-label={`Remove ${nameOf(id)}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Unassigned</p>
+            )}
+            <Select
+              value=""
+              onValueChange={(value) => { if (value) setAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value])); }}
+              disabled={loadingUsers || assigneeIds.length >= 10}
+            >
+              <SelectTrigger id="assignees" aria-label="Add a person">
+                <SelectValue placeholder={loadingUsers ? 'Loading people...' : assigneeIds.length >= 10 ? 'At most 10 people' : 'Add a person...'} />
+              </SelectTrigger>
+              <SelectContent>
+                {users
+                  .filter((user: any) => user && typeof user.id === 'string' && user.id.trim() !== '' && !assigneeIds.includes(user.id))
+                  .map((user: any) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.roles.join(', ')} - {user.name || 'Unknown'}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-muted-foreground">
               {users.length > 0 && users.every((user: any) => user?.id === (userProfile as any)?.id)
                 ? 'You can assign a task to yourself. Project managers assign tasks to the rest of the team.'
-                : 'Only members of the project team can be assigned. Add people in the Team section first.'}
+                : 'Choose one or more people. You can assign people below you in the role hierarchy, and yourself.'}
             </p>
           </div>
 

@@ -59,6 +59,7 @@
     "e2e:local:browser-reads-d": "node tests/local-e2e/browser-reads-d.mjs",
     "e2e:local:browser-reads-e": "node tests/local-e2e/browser-reads-e.mjs",
     "e2e:local:pagination": "node tests/local-e2e/pagination.mjs",
+    "e2e:local:multi-assignee": "node tests/local-e2e/multi-assignee.mjs",
     "e2e:local:pagination-ui": "node tests/local-e2e/pagination-browser.mjs",
     "shared-db:baseline": "node scripts/shared-db/build-baseline.mjs --container supabase_db_pm-shared-rehearsal",
     "shared-db:rehearse": "node scripts/shared-db/rehearse.mjs --rebuild",

@@ -1,4 +1,5 @@
 import { api, ok, getScope, requireManager, today, weekStart, addDays } from '@/lib/api/context'
+import { assigneeIdsByTask } from '@/lib/task-assignees'
 import { normalizeStatus } from '@/lib/task-rules'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -18,7 +19,10 @@ export const GET = api(async (request, ctx) => {
   ])
   const projectName: Record<string, string> = Object.fromEntries((projectsRes.data || []).map((p: any) => [p.id, p.name]))
   const userIds = new Set<string>((assign.data || []).map((a: any) => a.user_id))
-  ;(tasksRes.data || []).forEach((x: any) => x.assigned_to && userIds.add(x.assigned_to))
+  // Everyone on each task (shared tasks have several assignees)
+  const onTask = await assigneeIdsByTask(ctx.admin, (tasksRes.data || []).map((x: any) => x.id))
+  const peopleOn = (x: any): string[] => onTask.get(x.id) || (x.assigned_to ? [x.assigned_to] : [])
+  ;(tasksRes.data || []).forEach((x: any) => peopleOn(x).forEach((id) => userIds.add(id)))
   if (!userIds.size) return ok([], 200, { weekStart: ws })
   const list = Array.from(userIds)
 
@@ -30,7 +34,7 @@ export const GET = api(async (request, ctx) => {
   ])
   const tasks = (tasksRes.data || []).map((x: any) => ({ ...x, status: normalizeStatus(x.status) }))
   const rows = (profiles.data || []).filter((p: any) => !p.is_client).map((p: any) => {
-    const mine = tasks.filter((x: any) => x.assigned_to === p.id)
+    const mine = tasks.filter((x: any) => peopleOn(x).includes(p.id))
     const open = mine.filter((x: any) => x.status !== 'done')
     const hours = (entries.data || []).filter((e: any) => e.user_id === p.id).reduce((s: number, e: any) => s + Number(e.hours_logged || 0), 0)
     const avail = (availability.data || []).find((a: any) => a.user_id === p.id)

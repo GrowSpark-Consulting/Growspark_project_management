@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { api, readJson, requireProject, assertValidAssignee, HttpError, check } from '@/lib/api/context'
-import { notify } from '@/lib/notify'
+import { assertCanAssign, setTaskAssignees, listAssignees, MAX_ASSIGNEES } from '@/lib/task-assignees'
 import { ALL_TASK_STATUSES } from '@/lib/task-rules'
 
 const createTaskSchema = z.object({
@@ -15,6 +15,8 @@ const createTaskSchema = z.object({
   due_date: z.string().optional().nullable(),
   estimated_hours: z.number().min(0).max(10000).optional().nullable(),
   assigned_to: z.string().uuid('Invalid assignee ID').optional().nullable(),
+  // Several assignees on the one task (takes the place of assigned_to when given)
+  assignee_ids: z.array(z.string().uuid('Invalid assignee ID')).max(MAX_ASSIGNEES).optional(),
   reviewer_id: z.string().uuid('Invalid reviewer ID').optional().nullable(),
 }).refine((d) => !(d.start_date && d.due_date) || d.due_date >= d.start_date, {
   message: 'Due date cannot be before start date', path: ['due_date'],
@@ -31,16 +33,15 @@ export const POST = api(async (request: NextRequest, ctx) => {
     if (!parent || parent.project_id !== body.project_id) throw new HttpError(400, 'Parent task must be in the same project')
     if (parent.parent_task_id) throw new HttpError(400, 'Subtasks cannot have their own subtasks')
   }
-  if (body.assigned_to) {
-    // Employees assign tasks to themselves only; a project manager can assign anyone on the team
-    if (body.assigned_to !== ctx.userId && !access.canManage) throw new HttpError(403, 'You can only assign tasks to yourself')
-    await assertValidAssignee(ctx, body.project_id, body.assigned_to)
-  }
+  // Employees assign tasks to themselves only; a project manager can assign themselves and people below them in the
+  // role hierarchy (lib/task-assignees.ts). Checked before anything is created.
+  const assigneeIds = [...new Set(body.assignee_ids ?? (body.assigned_to ? [body.assigned_to] : []))]
+  if (assigneeIds.length > 0) await assertCanAssign(ctx, access, body.project_id, assigneeIds, body.reviewer_id)
   if (body.reviewer_id) {
     // The reviewer is chosen by a project manager only (also enforced by the database, G-1)
     if (!access.canManage) throw new HttpError(403, 'Only a project manager can choose the reviewer')
     await assertValidAssignee(ctx, body.project_id, body.reviewer_id)
-    if (body.reviewer_id === body.assigned_to) throw new HttpError(400, 'The reviewer cannot be the person assigned to the task')
+    if (assigneeIds.includes(body.reviewer_id)) throw new HttpError(400, 'The reviewer cannot be the person assigned to the task')
   }
 
   // Employees can't create tasks directly in review/done states
@@ -62,7 +63,7 @@ export const POST = api(async (request: NextRequest, ctx) => {
       remaining_hours: body.estimated_hours ?? null,
       actual_hours: 0,
       created_by: ctx.userId,
-      assigned_to: body.assigned_to || null,
+      assigned_to: null, // the assignees are added below, one row each (the first becomes assigned_to)
       reviewer_id: body.reviewer_id || null,
     })
     .select(`*, created_by_user:user_profiles!created_by(id, name, email), assigned_to_user:user_profiles!assigned_to(id, name, email), project:projects(id, name)`)
@@ -80,16 +81,13 @@ export const POST = api(async (request: NextRequest, ctx) => {
     await ctx.admin.from('project_assignments').update({ removed_at: null }).eq('id', existing.id)
   }
 
-  if (task.assigned_to && task.assigned_to !== ctx.userId) {
-    await notify(ctx.admin, [task.assigned_to], {
-      type: 'task_assigned',
-      title: 'New task assigned to you',
-      message: `${ctx.user.name || 'Someone'} assigned you "${task.name}" in ${access.project.name}`,
-      link: `/projects/${body.project_id}?task=${task.id}`,
-      projectId: body.project_id,
-    })
+  if (assigneeIds.length > 0) {
+    await setTaskAssignees(ctx, task, access, assigneeIds)
+    const { data: fresh } = await ctx.admin.from('tasks').select('assigned_to, progress_percent').eq('id', task.id).maybeSingle()
+    if (fresh) Object.assign(task, fresh)
   }
+  const assignees = (await listAssignees(ctx.admin, [task.id])).get(task.id) || []
 
   // keep the legacy { success, task } shape used by existing UI
-  return NextResponse.json({ success: true, task, data: task }, { status: 201 })
+  return NextResponse.json({ success: true, task: { ...task, assignees }, data: { ...task, assignees } }, { status: 201 })
 })

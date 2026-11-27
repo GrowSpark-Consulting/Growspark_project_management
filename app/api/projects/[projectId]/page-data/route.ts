@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { listAssignees } from '@/lib/task-assignees';
 import { api, ok, assertUuid, HttpError } from '@/lib/api/context';
 import { uuidSchema } from '@/lib/validation-schemas';
 import { accountService } from '@/lib/account-service';
@@ -154,7 +155,10 @@ export const GET = api<{ projectId: string }>(async (request, ctx, params) => {
         taskServiceDB.getTasksByProject(projectId, db),
         db.from('time_entries').select('hours_logged').eq('project_id', projectId).is('task_id', null),
       ]);
-      return ok({ tasks, projectHours: (projectHours.data || []).reduce((sum: number, e: any) => sum + (e.hours_logged || 0), 0) });
+      // Everyone on each task (shared tasks have several assignees), for the avatars and progress on the board
+      const byTask = await listAssignees(db, (tasks || []).map((t: any) => t.id));
+      const withAssignees = (tasks || []).map((t: any) => ({ ...t, assignees: byTask.get(t.id) || [] }));
+      return ok({ tasks: withAssignees, projectHours: (projectHours.data || []).reduce((sum: number, e: any) => sum + (e.hours_logged || 0), 0) });
     }
     case 'latest-run': {
       const { data } = await db.from('workflow_instances').select('id, status').eq('project_id', projectId)

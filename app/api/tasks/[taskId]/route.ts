@@ -4,6 +4,7 @@ import { checkDemoModeForDestructiveAction } from '@/lib/api-demo-guard'
 import { api, readJson, requireTask, assertValidAssignee, HttpError, check, type ApiCtx } from '@/lib/api/context'
 import { ALL_TASK_STATUSES, statusChangeNeedsReviewer, normalizeStatus } from '@/lib/task-rules'
 import { afterTaskChange } from '@/lib/task-events'
+import { setTaskAssignees, listAssignees, MAX_ASSIGNEES } from '@/lib/task-assignees'
 
 const updateTaskSchema = z.object({
   name: z.string().trim().min(1, 'Task name is required').max(500).optional(),
@@ -16,6 +17,8 @@ const updateTaskSchema = z.object({
   actual_hours: z.number().min(0).max(10000).optional().nullable(),
   remaining_hours: z.number().min(0).max(10000).optional().nullable(),
   assigned_to: z.string().uuid().optional().nullable(),
+  // The full list of people on the task (several assignees); people left out are removed
+  assignee_ids: z.array(z.string().uuid()).max(MAX_ASSIGNEES).optional(),
   reviewer_id: z.string().uuid().optional().nullable(),
   review_note: z.string().max(2000).optional().nullable(),
   progress_percent: z.number().int().min(0).max(100).optional(),
@@ -31,6 +34,8 @@ const DETAIL_FIELDS = ['name', 'priority', 'start_date', 'due_date', 'estimated_
 async function updateTask(request: NextRequest, ctx: ApiCtx, params: { taskId: string }) {
   const { task, access, canReview, canEditDetails } = await requireTask(ctx, params.taskId, 'contribute')
   const body = await readJson(request, updateTaskSchema)
+  const assigneeIds = body.assignee_ids
+  delete (body as { assignee_ids?: unknown }).assignee_ids
 
   for (const field of DETAIL_FIELDS) {
     if (body[field] !== undefined && body[field] !== task[field] && !canEditDetails) {
@@ -58,6 +63,9 @@ async function updateTask(request: NextRequest, ctx: ApiCtx, params: { taskId: s
   if (nextReviewer && nextReviewer === nextAssignee) {
     throw new HttpError(400, 'The reviewer cannot be the person assigned to the task')
   }
+  if (nextReviewer && assigneeIds?.includes(nextReviewer)) {
+    throw new HttpError(400, 'The reviewer cannot be the person assigned to the task')
+  }
 
   const update: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(body)) {
@@ -73,16 +81,24 @@ async function updateTask(request: NextRequest, ctx: ApiCtx, params: { taskId: s
       throw new HttpError(400, 'A note is required when requesting changes')
     }
   }
-  if (Object.keys(update).length === 0) throw new HttpError(400, 'No fields to update')
-  update.updated_at = new Date().toISOString()
+  if (Object.keys(update).length === 0 && assigneeIds === undefined) throw new HttpError(400, 'No fields to update')
+  const SELECT = `*, created_by_user:user_profiles!created_by(id, name, email), assigned_to_user:user_profiles!assigned_to(id, name, email), project:projects(id, name)`
 
-  const updated = check(await ctx.supabase
-    .from('tasks').update(update).eq('id', task.id)
-    .select(`*, created_by_user:user_profiles!created_by(id, name, email), assigned_to_user:user_profiles!assigned_to(id, name, email), project:projects(id, name)`)
-    .single())
+  let updated = task
+  if (Object.keys(update).length > 0) {
+    update.updated_at = new Date().toISOString()
+    updated = check(await ctx.supabase.from('tasks').update(update).eq('id', task.id).select(SELECT).single())
+  }
+  if (assigneeIds !== undefined) {
+    // Several assignees: add and remove people (employees only themselves; managers people below them)
+    await setTaskAssignees(ctx, { ...task, ...updated }, access, assigneeIds)
+    updated = check(await ctx.supabase.from('tasks').select(SELECT).eq('id', task.id).single())
+  }
 
-  await afterTaskChange(ctx, task, updated)
-  return NextResponse.json({ success: true, task: updated, data: updated })
+  // New assignees are announced by setTaskAssignees: do not announce the new first assignee a second time
+  await afterTaskChange(ctx, task, assigneeIds !== undefined ? { ...updated, assigned_to: task.assigned_to } : updated)
+  const assignees = (await listAssignees(ctx.admin, [task.id])).get(task.id) || []
+  return NextResponse.json({ success: true, task: { ...updated, assignees }, data: { ...updated, assignees } })
 }
 
 export const PUT = api<{ taskId: string }>(updateTask)

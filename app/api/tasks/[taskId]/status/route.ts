@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { api, readJson, requireTask, HttpError, check, ok, weekStart, today } from '@/lib/api/context'
 import { TASK_ACTIONS, normalizeStatus, type TaskAction } from '@/lib/task-rules'
 import { afterTaskChange } from '@/lib/task-events'
+import { listAssignees, updateMyWork, type AssigneeStatus } from '@/lib/task-assignees'
 
 const schema = z.object({
   action: z.enum(['start', 'pause', 'resume', 'submit', 'withdraw', 'approve', 'request_changes', 'reopen']),
@@ -20,10 +21,16 @@ export const POST = api<{ taskId: string }>(async (request, ctx, params) => {
   if (def.reviewerOnly && !canReview) {
     throw new HttpError(403, 'Only the reviewer or a project manager can do this')
   }
-  const fromOk = def.from === 'any' || (def.from as string[]).includes(current) || (action === 'approve' && canReview && current !== 'done')
+  // On a task shared by several people these buttons act on the person's own part (lib/task-assignees.ts); approve,
+  // request changes and reopen stay task-level
+  const sharedRows = (await listAssignees(ctx.admin, [task.id])).get(task.id) || []
+  const ownPart = sharedRows.length >= 2 && sharedRows.some((r) => r.user_id === ctx.userId) && ['start', 'resume', 'pause', 'submit', 'withdraw'].includes(action)
+  const OWN_PART_STATUS: Record<string, AssigneeStatus> = { start: 'in_progress', resume: 'in_progress', pause: 'blocked', submit: 'done', withdraw: 'in_progress' }
+  if (ownPart && current === 'done') throw new HttpError(409, 'This task is done. Ask a project manager to reopen it.')
+  const fromOk = ownPart || def.from === 'any' || (def.from as string[]).includes(current) || (action === 'approve' && canReview && current !== 'done')
   if (!fromOk) throw new HttpError(409, `Cannot ${def.label.toLowerCase()} a task that is ${current.replace('_', ' ')}`)
   if (action === 'request_changes' && !body.note?.trim()) throw new HttpError(400, 'Please describe the changes you need')
-  if (action === 'withdraw' && task.assigned_to && task.assigned_to !== ctx.userId && !canReview) {
+  if (!ownPart && action === 'withdraw' && task.assigned_to && task.assigned_to !== ctx.userId && !canReview) {
     throw new HttpError(403, 'Only the assignee can withdraw a submission')
   }
 
@@ -56,6 +63,15 @@ export const POST = api<{ taskId: string }>(async (request, ctx, params) => {
       await ctx.admin.from('tasks').update({ actual_hours: Number(task.actual_hours || 0) + logged }).eq('id', task.id)
       timer = { loggedHours: logged }
     }
+  }
+
+  if (ownPart) {
+    const mine = sharedRows.find((r) => r.user_id === ctx.userId)!
+    // The same action twice changes nothing (a second Start on a part that is already in progress)
+    if (mine.status === OWN_PART_STATUS[action]) return ok({ task, timer, assignees: sharedRows })
+    const result = await updateMyWork(ctx, task, sharedRows, { status: OWN_PART_STATUS[action], ...(body.note ? { report: body.note } : {}) })
+    const { data: freshTask } = await ctx.admin.from('tasks').select('*').eq('id', task.id).maybeSingle()
+    return ok({ task: freshTask || task, timer, assignees: result.assignees })
   }
 
   const updated = check(await ctx.supabase.from('tasks').update(update).eq('id', task.id).select('*').single())

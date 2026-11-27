@@ -39,6 +39,14 @@ const ACTIVITY_LABEL: Record<string, string> = {
   created: 'created the task', status_changed: 'changed status', assigned: 'changed the assignee',
   priority_changed: 'changed priority', progress_updated: 'updated progress', review_submitted: 'submitted for review',
   review_approved: 'approved the task', changes_requested: 'requested changes', reopened: 'reopened the task',
+  assignee_added: 'added a person', assignee_removed: 'removed a person', report_updated: 'updated their part',
+};
+
+const PART_STATUS: Record<string, { label: string; className: string }> = {
+  todo: { label: 'To do', className: 'bg-gray-100 text-gray-700' },
+  in_progress: { label: 'In progress', className: 'bg-blue-50 text-blue-700' },
+  blocked: { label: 'Blocked', className: 'bg-red-50 text-red-700' },
+  done: { label: 'Done', className: 'bg-green-50 text-green-700' },
 };
 
 export default function TaskDetailDialog({ taskId, open, onOpenChange, onChanged }: Props) {
@@ -113,7 +121,14 @@ function TaskBody({ detail, refresh, openTask }: { detail: any; refresh: () => v
         <DialogDescription className="flex flex-wrap items-center gap-2 pt-1">
           <TaskStatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
-          <span className="text-xs text-gray-500">Assignee: <b>{name(task.assigned_to)}</b></span>
+          {detail.shared ? (
+            <span className="text-xs text-gray-500" data-testid="task-assignees">
+              Assignees: <b>{detail.assignees.map((a: any) => a.user?.name || name(a.user_id)).join(', ')}</b>
+              {' '}· {detail.assigneeSummary.done} of {detail.assigneeSummary.total} done · {detail.assigneeSummary.progress}%
+            </span>
+          ) : (
+            <span className="text-xs text-gray-500">Assignee: <b>{name(task.assigned_to)}</b></span>
+          )}
           <span className="text-xs text-gray-500">Reviewer: <b>{reviewer}</b></span>
           {task.due_date && <span className="text-xs text-gray-500">Due {formatDay(task.due_date)}</span>}
         </DialogDescription>
@@ -156,8 +171,9 @@ function TaskBody({ detail, refresh, openTask }: { detail: any; refresh: () => v
         </div>
       )}
 
-      <Tabs defaultValue="details">
+      <Tabs defaultValue={detail.shared ? 'people' : 'details'}>
         <TabsList className="flex flex-wrap h-auto">
+          {detail.assignees.length > 0 && <TabsTrigger value="people">People ({detail.assignees.length})</TabsTrigger>}
           <TabsTrigger value="details">Details</TabsTrigger>
           {!task.parent_task_id && <TabsTrigger value="subtasks">Subtasks ({detail.subtasks.length})</TabsTrigger>}
           <TabsTrigger value="comments">Comments ({detail.comments.length})</TabsTrigger>
@@ -166,6 +182,7 @@ function TaskBody({ detail, refresh, openTask }: { detail: any; refresh: () => v
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
+        {detail.assignees.length > 0 && <TabsContent value="people"><PeopleTab detail={detail} refresh={refresh} name={name} /></TabsContent>}
         <TabsContent value="details"><DetailsTab detail={detail} team={team} refresh={refresh} /></TabsContent>
         {!task.parent_task_id && (
           <TabsContent value="subtasks"><SubtasksTab detail={detail} refresh={refresh} openTask={openTask} name={name} /></TabsContent>
@@ -182,6 +199,8 @@ function TaskBody({ detail, refresh, openTask }: { detail: any; refresh: () => v
                   {a.action === 'status_changed' || a.action.startsWith('review') || a.action === 'changes_requested' || a.action === 'reopened'
                     ? <> ({statusLabel(a.from_value)} → {statusLabel(a.to_value)})</>
                     : a.action === 'assigned' ? <> ({name(a.from_value)} → {name(a.to_value)})</>
+                    : a.action === 'assignee_added' ? <>: {name(a.to_value)}</>
+                    : a.action === 'assignee_removed' ? <>: {name(a.from_value)}</>
                     : a.action === 'progress_updated' ? <> ({a.from_value}% → {a.to_value}%)</>
                     : a.action === 'priority_changed' ? <> ({a.from_value} → {a.to_value})</> : null}
                 </div>
@@ -192,6 +211,103 @@ function TaskBody({ detail, refresh, openTask }: { detail: any; refresh: () => v
           </ul>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function PeopleTab({ detail, refresh, name }: { detail: any; refresh: () => void; name: (id: string | null) => string }) {
+  const { task, permissions, assignees, assigneeSummary } = detail;
+  const mine = assignees.find((a: any) => a.user_id === detail.me);
+  const canEditMine = detail.shared && !!mine && permissions.canContribute && detail.project.status !== 'complete' && task.status !== 'done';
+  return (
+    <div className="space-y-4 pt-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600" data-testid="people-summary">
+        <span><b>{assigneeSummary.done}</b> of <b>{assigneeSummary.total}</b> completed their part</span>
+        <span>Overall progress <b>{assigneeSummary.progress}%</b></span>
+        <span><b>{Number(assigneeSummary.hours_logged || 0).toFixed(2)}h</b> logged in total</span>
+      </div>
+      {canEditMine && <MyPart task={task} mine={mine} refresh={refresh} />}
+      <ul className="space-y-2" data-testid="people-list">
+        {assignees.map((a: any) => {
+          const st = PART_STATUS[a.status] || PART_STATUS.todo;
+          return (
+            <li key={a.user_id} className="rounded-lg border p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-xs font-medium">
+                    {(a.user?.name || name(a.user_id)).split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                  </span>
+                  <span className="text-sm font-medium">{a.user?.name || name(a.user_id)}{a.user_id === detail.me ? ' (me)' : ''}</span>
+                  <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${st.className}`}>{st.label}</span>
+                </div>
+                <span className="text-xs text-gray-500">{Number(a.hours_logged || 0).toFixed(2)}h logged</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 flex-1 rounded-full bg-gray-100"><div className="h-1.5 rounded-full bg-primary" style={{ width: `${a.progress_percent}%` }} /></div>
+                <span className="w-10 text-right text-xs text-gray-600">{a.progress_percent}%</span>
+              </div>
+              {a.blocker && <p className="rounded bg-red-50 px-2 py-1 text-xs text-red-700"><b>Blocked:</b> {a.blocker}</p>}
+              {a.report && <p className="whitespace-pre-wrap text-sm text-gray-700">{a.report}</p>}
+              {!a.report && !a.blocker && <p className="text-xs text-gray-400">No report yet.</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function MyPart({ task, mine, refresh }: { task: any; mine: any; refresh: () => void }) {
+  const [form, setForm] = useState({ status: mine.status, progress: mine.progress_percent, report: mine.report || '', blocker: mine.blocker || '' });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setForm({ status: mine.status, progress: mine.progress_percent, report: mine.report || '', blocker: mine.blocker || '' });
+  }, [mine.status, mine.progress_percent, mine.report, mine.blocker]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await apiSend(`/api/tasks/${task.id}/my-work`, 'PATCH', {
+        status: form.status, progress_percent: Number(form.progress), report: form.report, blocker: form.blocker,
+      });
+      toast.success(form.status === 'done' ? 'Your part is marked complete' : 'Your update is saved');
+      refresh();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="rounded-lg border bg-gray-50 p-3 space-y-3" data-testid="my-part">
+      <div className="text-sm font-medium">My part</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label>Status</Label>
+          <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v, progress: v === 'done' ? 100 : f.progress }))}>
+            <SelectTrigger aria-label="My status"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(PART_STATUS).map(([value, meta]) => <SelectItem key={value} value={value}>{meta.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>My progress: {form.progress}%</Label>
+          <Slider value={[Number(form.progress)]} min={0} max={100} step={5} onValueChange={(v) => setForm((f) => ({ ...f, progress: v[0] }))} />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label>Work report</Label>
+        <Textarea rows={3} value={form.report} maxLength={5000} placeholder="What you did, what is left"
+          onChange={(e) => setForm((f) => ({ ...f, report: e.target.value }))} />
+      </div>
+      <div className="space-y-1">
+        <Label>Blocker (optional)</Label>
+        <Input value={form.blocker} maxLength={2000} placeholder="Anything stopping you"
+          onChange={(e) => setForm((f) => ({ ...f, blocker: e.target.value }))} />
+      </div>
+      <div className="flex justify-end">
+        <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save my update'}</Button>
+      </div>
     </div>
   );
 }
@@ -213,16 +329,17 @@ function DetailsTab({ detail, team, refresh }: { detail: any; team: any[]; refre
   const save = async () => {
     setSaving(true);
     try {
-      const body: Record<string, any> = { description: form.description || null, progress_percent: Number(form.progress_percent) };
+      // On a shared task progress is the average of everyone's part, and people are changed with Edit Task
+      const body: Record<string, any> = { description: form.description || null, ...(detail.shared ? {} : { progress_percent: Number(form.progress_percent) }) };
       if (canDetails) {
         Object.assign(body, {
           name: form.name, priority: form.priority,
           start_date: form.start_date || null, due_date: form.due_date || null,
           estimated_hours: form.estimated_hours === '' ? null : Number(form.estimated_hours),
-          assigned_to: form.assigned_to === 'none' ? null : form.assigned_to,
+          ...(detail.shared ? {} : { assigned_to: form.assigned_to === 'none' ? null : form.assigned_to }),
         });
         if (canChooseReviewer) body.reviewer_id = form.reviewer_id === 'none' ? null : form.reviewer_id;
-      } else if (!task.assigned_to && form.assigned_to !== 'none') {
+      } else if (!detail.shared && !task.assigned_to && form.assigned_to !== 'none') {
         body.assigned_to = form.assigned_to; // self-assign
       }
       await apiSend(`/api/tasks/${task.id}`, 'PATCH', body);
@@ -259,7 +376,10 @@ function DetailsTab({ detail, team, refresh }: { detail: any; team: any[]; refre
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label>Assignee</Label>
+          <Label>{detail.shared ? 'Assignees' : 'Assignee'}</Label>
+          {detail.shared ? (
+            <p className="text-sm">{detail.assignees.map((a: any) => a.user?.name || 'Team member').join(', ')}<span className="block text-xs text-gray-500">Add or remove people with Edit Task.</span></p>
+          ) : (
           <Select value={form.assigned_to} onValueChange={(v) => set('assigned_to', v)} disabled={!canDetails && !!task.assigned_to}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -267,6 +387,7 @@ function DetailsTab({ detail, team, refresh }: { detail: any; team: any[]; refre
               {(canDetails ? team : team.filter((m: any) => m.id === detail.me)).map((m: any) => <SelectItem key={m.id} value={m.id}>{m.name}{m.id === detail.me ? ' (me)' : ''}</SelectItem>)}
             </SelectContent>
           </Select>
+          )}
         </div>
         <div className="space-y-1">
           <Label>Reviewer</Label>
@@ -280,11 +401,15 @@ function DetailsTab({ detail, team, refresh }: { detail: any; team: any[]; refre
           {!canChooseReviewer && <p className="text-xs text-gray-500">Only a project manager can choose the reviewer.</p>}
         </div>
       </div>
+      {detail.shared ? (
+        <p className="text-sm text-gray-600">Overall progress: <b>{detail.assigneeSummary.progress}%</b> (the average of everyone&apos;s part, see People)</p>
+      ) : (
       <div className="space-y-2">
         <Label>Progress: {form.progress_percent}%</Label>
         <Slider value={[Number(form.progress_percent)]} min={0} max={100} step={5} disabled={!canContribute || task.status === 'done'}
           onValueChange={(v) => set('progress_percent', v[0])} />
       </div>
+      )}
       <div className="flex items-center justify-between text-xs text-gray-500">
         <span>Logged: {Number(task.actual_hours || 0).toFixed(2)}h{task.estimated_hours ? ` of ${task.estimated_hours}h` : ''}</span>
         {(canContribute || canDetails) && <Button size="sm" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>}

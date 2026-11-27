@@ -1,4 +1,5 @@
 import { api, ok, getScope, requireManager, today } from '@/lib/api/context'
+import { assigneeIdsByTask } from '@/lib/task-assignees'
 import { normalizeStatus } from '@/lib/task-rules'
 import { loadFinancials } from '@/lib/project-financials'
 
@@ -61,13 +62,16 @@ export const GET = api(async (_request, ctx) => {
 
   // Workload: open tasks per team member
   const memberIds = new Set<string>((assignRes.data || []).map((a: any) => a.user_id))
-  tasks.forEach((x: any) => x.assigned_to && memberIds.add(x.assigned_to))
+  // Everyone on each task (shared tasks have several assignees)
+  const onTask = await assigneeIdsByTask(ctx.admin, tasks.map((x: any) => x.id))
+  const peopleOn = (x: any): string[] => onTask.get(x.id) || (x.assigned_to ? [x.assigned_to] : [])
+  tasks.forEach((x: any) => peopleOn(x).forEach((id) => memberIds.add(id)))
   const { data: people } = memberIds.size
     ? await ctx.admin.from('user_profiles').select('id, name, is_client, is_active').in('id', Array.from(memberIds))
     : { data: [] }
   const staff = (people || []).filter((p: any) => !p.is_client && p.is_active !== false)
   const workload = staff.map((p: any) => {
-    const mine = tasks.filter((x: any) => x.assigned_to === p.id && x.status !== 'done')
+    const mine = tasks.filter((x: any) => peopleOn(x).includes(p.id) && x.status !== 'done')
     return { user: { id: p.id, name: p.name }, open: mine.length, overdue: mine.filter((x: any) => x.due_date && x.due_date.slice(0, 10) < t).length, inReview: mine.filter((x: any) => x.status === 'review').length }
   }).sort((a: any, b: any) => b.open - a.open)
 

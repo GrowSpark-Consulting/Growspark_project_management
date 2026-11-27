@@ -3,6 +3,7 @@ import { normalizeStatus, TASK_STATUSES } from '@/lib/task-rules'
 import { Prisma } from '@/lib/db/generated/client'
 import { withSystem, schemaName } from '@/lib/db'
 import { wantsPage, readPage, pageInfo, searchTerm } from '@/lib/pagination'
+import { listAssignees, summarize } from '@/lib/task-assignees'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // GET /api/me/tasks?view=assigned|created|in_progress|review|changes_requested|done|overdue|to_review
@@ -31,7 +32,8 @@ export const GET = api(async (request, ctx) => {
   // Legacy statuses read as their current names (as normalizeStatus does)
   const norm = Prisma.sql`(case when tk.status is null or tk.status = 'backlog' then 'todo' when tk.status = 'blocked' then 'on_hold' else tk.status end)`
   const overdue = Prisma.sql`(tk.due_date < ${t}::date and ${norm} <> 'done')`
-  const mine = Prisma.sql`tk.assigned_to = ${me}::uuid`
+  // Mine: I am on the task (one of its assignees; tasks.assigned_to is the first of them)
+  const mine = Prisma.sql`(tk.assigned_to = ${me}::uuid or exists (select 1 from ${tbl('task_assignees')} ta where ta.task_id = tk.id and ta.user_id = ${me}::uuid))`
   const viewSql: Record<View, Prisma.Sql> = {
     assigned: mine,
     created: Prisma.sql`tk.created_by = ${me}::uuid`,
@@ -40,11 +42,11 @@ export const GET = api(async (request, ctx) => {
     changes_requested: Prisma.sql`${mine} and ${norm} = 'changes_requested'`,
     done: Prisma.sql`${mine} and ${norm} = 'done'`,
     overdue: Prisma.sql`${mine} and ${overdue}`,
-    to_review: Prisma.sql`tk.reviewer_id = ${me}::uuid and ${norm} = 'review' and tk.assigned_to is distinct from ${me}::uuid`,
+    to_review: Prisma.sql`tk.reviewer_id = ${me}::uuid and ${norm} = 'review' and not ${mine}`,
   }
   // Everything relevant to me: assigned to me, created by me, or waiting for my review; open projects only
   const base = Prisma.sql`from ${tbl('tasks')} tk join ${tbl('projects')} p on p.id = tk.project_id and p.archived_at is null
-    where (tk.assigned_to = ${me}::uuid or tk.created_by = ${me}::uuid or tk.reviewer_id = ${me}::uuid)`
+    where (${mine} or tk.created_by = ${me}::uuid or tk.reviewer_id = ${me}::uuid)`
 
   const filters: Prisma.Sql[] = [viewSql[view]]
   const projectId = sp.get('projectId')
@@ -99,8 +101,13 @@ export const GET = api(async (request, ctx) => {
     if (sub.status === 'done') c.done += 1
   })
 
+  // Everyone on each task, my own part, and the overall progress (shared tasks)
+  const assigneesByTask = await listAssignees(ctx.admin, ids)
   const list = ids.map((id) => byId.get(id)).filter(Boolean).map((r: any) => ({
     ...r,
+    assignees: assigneesByTask.get(r.id) || [],
+    my_part: (assigneesByTask.get(r.id) || []).find((a) => a.user_id === me) || null,
+    assignee_summary: summarize(assigneesByTask.get(r.id) || []),
     status: normalizeStatus(r.status),
     project: Array.isArray(r.projects) ? r.projects[0] : r.projects,
     projects: undefined,

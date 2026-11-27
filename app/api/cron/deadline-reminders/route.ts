@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase-server'
 import { notify } from '@/lib/notify'
+import { assigneeIdsByTask } from '@/lib/task-assignees'
 import { logger } from '@/lib/debug-logger'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30,11 +31,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Query failed' }, { status: 500 })
   }
 
+  // Everyone on each task gets the reminder (shared tasks have several assignees)
+  const onTask = await assigneeIdsByTask(admin, ((tasks || []) as any[]).map((t) => t.id))
   let sent = 0
   for (const t of (tasks || []) as any[]) {
     const due = String(t.due_date).slice(0, 10)
     const kind = due === tomorrow ? 'due_tomorrow' : due === today ? 'due_today' : 'overdue'
-    await notify(admin, [t.assigned_to], {
+    await notify(admin, [t.assigned_to, ...(onTask.get(t.id) || [])], {
       type: 'deadline',
       title: kind === 'due_tomorrow' ? 'Task due tomorrow' : kind === 'due_today' ? 'Task due today' : 'Task overdue',
       message: `"${t.name}" ${kind === 'overdue' ? `was due on ${due}` : `is due ${kind === 'due_today' ? 'today' : 'tomorrow'}`}`,

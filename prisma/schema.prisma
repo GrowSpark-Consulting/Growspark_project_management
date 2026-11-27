@@ -82,7 +82,6 @@ model app_settings {
   terms_accepted_at   DateTime?      @db.Timestamptz(6)
   onboarding          Json           @default("{}")
   user_profiles       user_profiles? @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
-
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -245,7 +244,6 @@ model departments {
   department_members department_members[]
   roles              roles[]
   user_invitations   user_invitations[]
-
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -279,7 +277,6 @@ model form_templates {
   form_responses form_responses[]
   user_profiles  user_profiles?   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   workflow_nodes workflow_nodes[]
-
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -351,7 +348,6 @@ model onboarding_state {
   created_at         DateTime      @default(now()) @db.Timestamptz(6)
   updated_at         DateTime      @default(now()) @db.Timestamptz(6)
   user_profiles      user_profiles @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -416,7 +412,6 @@ model project_financials {
   currency      String         @default("INR")
   projects      projects       @relation(fields: [project_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   user_profiles user_profiles? @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
-
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -476,7 +471,6 @@ model project_templates {
   updated_at                   DateTime            @default(now()) @db.Timestamptz(6)
   user_profiles                user_profiles?      @relation(fields: [created_by], references: [id], onUpdate: NoAction)
   workflow_templates           workflow_templates? @relation(fields: [default_workflow_template_id], references: [id], onUpdate: NoAction)
-
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -605,7 +599,6 @@ model setup_tokens {
   used_by       String?        @db.Uuid
   created_at    DateTime       @default(now()) @db.Timestamptz(6)
   user_profiles user_profiles? @relation(fields: [used_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -663,6 +656,26 @@ model task_week_allocations {
   @@index([week_start_date], map: "idx_task_week_allocations_week_start_date")
 }
 
+/// One row per person on a task, with their own status, progress, report and blocker (see migration 20261127000000_task_assignees).
+model task_assignees {
+  task_id                                                 String         @db.Uuid
+  user_id                                                 String         @db.Uuid
+  assigned_by                                             String?        @db.Uuid
+  assigned_at                                             DateTime       @default(now()) @db.Timestamptz(6)
+  status                                                  String         @default("todo")
+  progress_percent                                        Int            @default(0) @db.SmallInt
+  report                                                  String?
+  blocker                                                 String?
+  completed_at                                            DateTime?      @db.Timestamptz(6)
+  updated_at                                              DateTime       @default(now()) @db.Timestamptz(6)
+  tasks                                                   tasks          @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user_profiles_task_assignees_user_idTouser_profiles     user_profiles  @relation("task_assignees_user_idTouser_profiles", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user_profiles_task_assignees_assigned_byTouser_profiles user_profiles? @relation("task_assignees_assigned_byTouser_profiles", fields: [assigned_by], references: [id], onUpdate: NoAction)
+
+  @@id([task_id, user_id])
+  @@index([user_id, task_id])
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model tasks {
@@ -693,6 +706,7 @@ model tasks {
   deliverables                                                  deliverables[]
   project_files                                                 project_files[]
   task_activity                                                 task_activity[]
+  task_assignees                                                task_assignees[]
   task_dependencies_task_dependencies_depends_on_task_idTotasks task_dependencies[]     @relation("task_dependencies_depends_on_task_idTotasks")
   task_dependencies_task_dependencies_task_idTotasks            task_dependencies[]     @relation("task_dependencies_task_idTotasks")
   task_week_allocations                                         task_week_allocations[]
@@ -864,6 +878,8 @@ model user_profiles {
   deliverables_deliverables_submitted_byTouser_profiles                          deliverables[]              @relation("deliverables_submitted_byTouser_profiles")
   department_members_department_members_added_byTouser_profiles                  department_members[]        @relation("department_members_added_byTouser_profiles")
   department_members_department_members_user_idTouser_profiles                   department_members[]        @relation("department_members_user_idTouser_profiles")
+  task_assignees_task_assignees_user_idTouser_profiles                           task_assignees[]            @relation("task_assignees_user_idTouser_profiles")
+  task_assignees_task_assignees_assigned_byTouser_profiles                       task_assignees[]            @relation("task_assignees_assigned_byTouser_profiles")
   form_responses                                                                 form_responses[]
   form_templates                                                                 form_templates[]
   milestones                                                                     milestones[]
@@ -1105,5 +1121,4 @@ model workflow_templates {
   workflow_instances   workflow_instances[]
   workflow_nodes       workflow_nodes[]
   user_profiles        user_profiles?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
 }
